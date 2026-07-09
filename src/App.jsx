@@ -6,6 +6,7 @@ import Mercuriale from './pages/Mercuriale'
 import Commandes from './pages/Commandes'
 import Reception from './pages/Reception'
 import Alertes from './pages/Alertes'
+import Reglages from './pages/Reglages'
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
             <Route path="/commandes" element={<Commandes />} />
             <Route path="/reception" element={<Reception />} />
             <Route path="/alertes" element={<Alertes />} />
+    	    <Route path="/reglages" element={<Reglages />} />
           </Routes>
         </main>
       </div>

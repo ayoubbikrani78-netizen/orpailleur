@@ -93,17 +93,30 @@ async function deleteMatierePremiere() {
   fetchAll()
 }
 
+  function calculerPrixUnitaireBase(prix, conditionnement, unite) {
+    if (!prix || !conditionnement) return 0
+    const p = parseFloat(prix)
+    const c = parseFloat(conditionnement)
+    const u = (unite || '').toLowerCase()
+    if (u === 'kg') return p / (c * 1000)
+    if (u === 'l') return p / (c * 1000)
+    if (u === 'g' || u === 'ml') return p / c
+    return p / c
+  }
+
   async function addFournisseurLink(mpId, link) {
     if (!link.fournisseur_id || !link.designation_fournisseur) return alert('Fournisseur et désignation requis')
+    const prixBase = calculerPrixUnitaireBase(link.prix_actuel, link.conditionnement, selected?.unite)
     await supabase.from('matieres_premieres_fournisseurs').insert({
       matiere_premiere_id: mpId,
       fournisseur_id: link.fournisseur_id,
       reference_fournisseur: link.reference_fournisseur,
       designation_fournisseur: link.designation_fournisseur,
       conditionnement: link.conditionnement,
+      unite: link.unite,
       prix_actuel: link.prix_actuel,
       prix_initial: link.prix_actuel,
-      prix_g_u_ml: link.conditionnement ? (link.prix_actuel / link.conditionnement) : 0
+      prix_g_u_ml: prixBase
     })
     openDetail(selected)
   }
@@ -149,7 +162,7 @@ async function deleteMatierePremiere() {
                   <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
                     {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
                   </span>
-                  <span className="text-xs text-gray-400">CMP : {mp.cmp ? `${mp.cmp}€` : '—'}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMP : {mp.cmp ? `${mp.cmp}€` : '—'}</span>
                   <ChevronRight size={16} className="text-gray-400" />
                 </div>
               </div>
@@ -243,7 +256,7 @@ function MercurialeDetail({ mp, fournisseurs, liens, mouvements, correctionStock
             <p className="text-xs opacity-70">Stock actuel</p>
             <p className="text-lg font-bold">{mp.quantite_stock || 0} {mp.unite}</p>
           </div>
-          <div className="rounded-lg p-3 bg-gray-50 text-gray-600">
+          <div className="rounded-lg p-3 bg-red-50 text-red-600">
             <p className="text-xs opacity-70">CMP</p>
             <p className="text-lg font-bold">{mp.cmp ? `${mp.cmp}€` : '—'}</p>
           </div>
@@ -265,7 +278,7 @@ function MercurialeDetail({ mp, fournisseurs, liens, mouvements, correctionStock
               </div>
               <div className="text-right">
                 <p className="font-medium text-gray-700">{l.prix_actuel}€ / {l.conditionnement}{mp.unite}</p>
-                <p className="text-xs text-gray-400">{l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(4)}€/u` : ''}</p>
+                <p className="text-xs text-gray-400">{l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(6)}€/${mp.unite === 'kg' || mp.unite === 'L' ? (mp.unite === 'kg' ? 'g' : 'ml') : mp.unite || 'u'}` : ''}</p>
               </div>
             </div>
           ))}
@@ -319,10 +332,13 @@ function MercurialeDetail({ mp, fournisseurs, liens, mouvements, correctionStock
           {mouvements.length === 0 && <p className="text-sm text-gray-400">Aucun mouvement enregistré.</p>}
           {mouvements.map(m => (
             <div key={m.id} className="flex items-center justify-between text-sm p-2 border-b border-gray-100">
-              <span className="text-gray-600">{m.type} {m.raison ? `— ${m.raison}` : ''}</span>
+              <div>
+                <span className="text-gray-600">{m.type} {m.raison ? `— ${m.raison}` : ''}</span>
+                <p className="text-xs text-gray-400">{new Date(m.date_mouvement).toLocaleDateString('fr-FR')}</p>
+              </div>
               <span className={`font-medium flex items-center gap-1 ${m.quantite >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 {m.quantite >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                {m.quantite}
+                {m.quantite > 0 ? '+' : ''}{m.quantite}{mp.unite || ''}
               </span>
             </div>
           ))}

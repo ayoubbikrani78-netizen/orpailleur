@@ -25,7 +25,34 @@ export default function Fournisseurs() {
       .select('*')
       .order('etat', { ascending: false })
       .order('nom')
-    setFournisseurs(data || [])
+
+    const { data: factures } = await supabase
+      .from('factures')
+      .select('fournisseur_id, montant_total_ht, created_at')
+      .eq('statut', 'validee')
+
+    const montantTotal = (factures || []).reduce((sum, f) => sum + (parseFloat(f.montant_total_ht) || 0), 0)
+
+    const stats = {}
+    for (const f of (factures || [])) {
+      if (!f.fournisseur_id) continue
+      if (!stats[f.fournisseur_id]) stats[f.fournisseur_id] = { nb_factures: 0, montant_total: 0, dernier_achat: null }
+      stats[f.fournisseur_id].nb_factures++
+      stats[f.fournisseur_id].montant_total += parseFloat(f.montant_total_ht) || 0
+      if (!stats[f.fournisseur_id].dernier_achat || f.created_at > stats[f.fournisseur_id].dernier_achat) {
+        stats[f.fournisseur_id].dernier_achat = f.created_at
+      }
+    }
+
+    const fournisseursAvecStats = (data || []).map(f => ({
+      ...f,
+      nb_factures: stats[f.id]?.nb_factures || 0,
+      montant_total: stats[f.id]?.montant_total || 0,
+      dernier_achat: stats[f.id]?.dernier_achat || null,
+      poids_pct: montantTotal > 0 ? ((stats[f.id]?.montant_total || 0) / montantTotal * 100).toFixed(1) : 0
+    }))
+
+    setFournisseurs(fournisseursAvecStats)
     setLoading(false)
   }
 
@@ -178,12 +205,32 @@ async function deleteFournisseur() {
               )}
 
               {selected && (
-                <div className="col-span-2 flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <span className="text-sm text-gray-600">Statut du fournisseur</span>
-                  <button onClick={() => { toggleEtat(selected); setShowForm(false) }} className={`text-xs px-3 py-1.5 rounded-full font-medium ${selected.etat === 'actif' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
-                    Passer {selected.etat === 'actif' ? 'Inactif' : 'Actif'}
-                  </button>
-                </div>
+                <>
+                  <div className="col-span-2 flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <span className="text-sm text-gray-600">Statut du fournisseur</span>
+                    <button onClick={() => { toggleEtat(selected); setShowForm(false) }} className={`text-xs px-3 py-1.5 rounded-full font-medium ${selected.etat === 'actif' ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-600'}`}>
+                      Passer {selected.etat === 'actif' ? 'Inactif' : 'Actif'}
+                    </button>
+                  </div>
+                  <div className="col-span-2 grid grid-cols-4 gap-3">
+                    <div className="p-3 bg-gray-50 rounded-lg text-center">
+                      <p className="text-xs text-gray-400 mb-1">Factures</p>
+                      <p className="font-bold text-gray-800">{selected.nb_factures || 0}</p>
+                    </div>
+                    <div className="p-3 bg-gray-50 rounded-lg text-center">
+                      <p className="text-xs text-gray-400 mb-1">Montant total</p>
+                      <p className="font-bold text-gray-800">{parseFloat(selected.montant_total || 0).toFixed(0)}€</p>
+                    </div>
+                    <div className="p-3 bg-gray-50 rounded-lg text-center">
+                      <p className="text-xs text-gray-400 mb-1">Poids achats</p>
+                      <p className="font-bold text-gray-800">{selected.poids_pct || 0}%</p>
+                    </div>
+                    <div className="p-3 bg-gray-50 rounded-lg text-center">
+                      <p className="text-xs text-gray-400 mb-1">Dernier achat</p>
+                      <p className="font-bold text-gray-800">{selected.dernier_achat ? new Date(selected.dernier_achat).toLocaleDateString('fr-FR') : '—'}</p>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
 

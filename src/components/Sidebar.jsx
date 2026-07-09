@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { FileText, Users, ShoppingBag, Truck, Bell, BarChart2 } from 'lucide-react'
+import { FileText, Users, ShoppingBag, Truck, Bell, BarChart2, Settings } from 'lucide-react'
 
 const nav = [
   { to: '/factures', label: 'Corbeille factures', icon: FileText },
@@ -8,6 +8,7 @@ const nav = [
   { to: '/commandes', label: 'Commandes', icon: ShoppingBag },
   { to: '/reception', label: 'Réception', icon: Truck },
   { to: '/alertes', label: 'Alertes', icon: Bell },
+  { to: '/reglages', label: 'Réglages', icon: Settings },
 ]
 
 export default function Sidebar() {

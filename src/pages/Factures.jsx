@@ -51,6 +51,8 @@ async function extractInvoiceData(imageBase64) {
                 "facture": {
                   "numero": "",
                   "date": "",
+                  "echeance": "",
+                  "delai_paiement_jours": 0,
                   "montant_total_ht": 0,
                   "montant_total_ttc": 0
                 },
@@ -172,10 +174,35 @@ export default function Factures() {
         return null
       }
 
+      const delaiPaiement = extracted.facture?.delai_paiement_jours || 0
+      const dateFacture = normalizeDate(extracted.facture?.date)
+
+      if (fournisseurId && delaiPaiement > 0) {
+        await supabase.from('fournisseurs').update({ delai_paiement: delaiPaiement }).eq('id', fournisseurId)
+      }
+
+      if (dateFacture && delaiPaiement > 0) {
+        const dateEcheance = new Date(dateFacture)
+        dateEcheance.setDate(dateEcheance.getDate() + delaiPaiement)
+        const dateAlerteJ7 = new Date(dateEcheance)
+        dateAlerteJ7.setDate(dateAlerteJ7.getDate() - 7)
+        const aujourdhui = new Date()
+        const joursAvantAlerte = Math.ceil((dateAlerteJ7 - aujourdhui) / (1000 * 60 * 60 * 24))
+
+        if (joursAvantAlerte <= 0) {
+          await supabase.from('alertes').insert({
+            type: 'retard_paiement',
+            message: `Paiement dû dans moins de 7 jours pour la facture ${extracted.facture?.numero || ''} — échéance le ${dateEcheance.toLocaleDateString('fr-FR')}`,
+            reference_id: fournisseurId,
+            reference_table: 'fournisseurs'
+          })
+        }
+      }
+
       await supabase.from('factures').update({
         fournisseur_id: fournisseurId,
         numero: extracted.facture?.numero,
-        date_facture: normalizeDate(extracted.facture?.date),
+        date_facture: dateFacture,
         montant_total_ht: extracted.facture?.montant_total_ht,
         montant_total_ttc: extracted.facture?.montant_total_ttc,
         lignes_extraites: JSON.stringify(extracted.lignes || []),
@@ -268,6 +295,13 @@ export default function Factures() {
           prix_actuel: prixUnitaire,
           prix_initial: prixUnitaire,
           prix_g_u_ml: prixGUML
+        })
+
+        await supabase.from('alertes').insert({
+          type: 'rupture_stock',
+          message: `Nouvel article détecté sur facture : "${ligne.designation}" — vérifiez et complétez la fiche dans la mercuriale`,
+          reference_id: nouvelleMp.id,
+          reference_table: 'matieres_premieres'
         })
       }
     }
