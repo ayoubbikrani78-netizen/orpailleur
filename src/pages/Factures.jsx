@@ -12,14 +12,37 @@ const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY
 async function pdfToImageBase64(file) {
   const arrayBuffer = await file.arrayBuffer()
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-  const page = await pdf.getPage(1)
-  const viewport = page.getViewport({ scale: 2 })
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  const ctx = canvas.getContext('2d')
-  await page.render({ canvasContext: ctx, viewport }).promise
-  return canvas.toDataURL('image/png').split(',')[1]
+  const numPages = pdf.numPages
+
+  const canvasFull = document.createElement('canvas')
+  const scale = numPages > 1 ? 1.5 : 2
+  let totalHeight = 0
+  let width = 0
+  const pageCanvases = []
+
+  for (let i = 1; i <= numPages; i++) {
+    const page = await pdf.getPage(i)
+    const viewport = page.getViewport({ scale })
+    const canvas = document.createElement('canvas')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    const ctx = canvas.getContext('2d')
+    await page.render({ canvasContext: ctx, viewport }).promise
+    pageCanvases.push(canvas)
+    totalHeight += viewport.height
+    width = Math.max(width, viewport.width)
+  }
+
+  canvasFull.width = width
+  canvasFull.height = totalHeight
+  const ctxFull = canvasFull.getContext('2d')
+  let y = 0
+  for (const c of pageCanvases) {
+    ctxFull.drawImage(c, 0, y)
+    y += c.height
+  }
+
+  return canvasFull.toDataURL('image/png').split(',')[1]
 }
 
 async function extractInvoiceData(imageBase64) {
@@ -37,37 +60,61 @@ async function extractInvoiceData(imageBase64) {
           content: [
             {
               type: 'text',
-              text: `Tu es un expert en lecture de factures fournisseurs pour une boulangerie. 
-              Extrais les informations suivantes de cette facture et retourne UNIQUEMENT un JSON valide sans aucun texte autour, sans backticks, sans markdown :
-              {
-                "fournisseur": {
-                  "nom": "",
-                  "adresse": "",
-                  "telephone": "",
-                  "email": "",
-                  "siret": "",
-                  "siren": ""
-                },
-                "facture": {
-                  "numero": "",
-                  "date": "",
-                  "echeance": "",
-                  "delai_paiement_jours": 0,
-                  "montant_total_ht": 0,
-                  "montant_total_ttc": 0
-                },
-                "lignes": [
-                  {
-                    "reference": "",
-                    "designation": "",
-                    "conditionnement": 0,
-                    "unite": "",
-                    "prix_unitaire_ht": 0,
-                    "quantite": 0,
-                    "montant_ht": 0
-                  }
-                ]
-              }`
+              text: `Tu es un expert en lecture de factures fournisseurs pour une boulangerie française.
+              
+Lis attentivement cette facture et extrais les données en suivant ces règles STRICTES :
+
+RÈGLES POUR LES LIGNES PRODUITS :
+- "quantite" = nombre de colis/unités achetés tel qu'indiqué dans la colonne QUANTITE de la facture
+- "conditionnement" = poids ou volume TOTAL par colis (ex: si "1KG" alors 1, si "13 kg" alors 13, si "2kg" alors 2)
+- "unite" = unité du conditionnement : "kg" pour kilogrammes, "L" pour litres, "piece" pour unités sans poids
+- "prix_unitaire_ht" = prix unitaire HT (colonne P.U. NET ou P.U. BRUT)
+RÈGLES POUR LES MONTANTS :
+- "montant_total_ht" = cherche la ligne "HT" dans le tableau de ventilation TVA en bas de page, c'est le total HT réel
+- "montant_total_ttc" = "Net à Payer" ou "Total TTC" en bas de la dernière page
+- Ignore tous les sous-totaux intermédiaires comme "<< Montant de commande HT >>"
+- Ignore le "CUMUL FACTURES" qui inclut les factures précédentes
+- Le HT correct est toujours inférieur au TTC
+- Pour calculer le stock : quantite × conditionnement = stock total (ex: 10 unités × 1kg = 10kg)
+- Si le produit n'a pas de poids (ex: boites, pièces, sachets), utilise "piece" comme unite et le nombre de pièces dans le colis comme conditionnement
+
+EXEMPLES CONCRETS :
+- "MIX MOZZA 1kg, quantite=10, prix=5.80" → quantite:10, conditionnement:1, unite:"kg"
+- "ORANGE 15kg, quantite=2, prix=1.50" → quantite:2, conditionnement:15, unite:"kg"
+- "COCA COLA 33CLx24, quantite=2, prix=0.55" → quantite:2, conditionnement:24, unite:"piece"
+- "FRAISE 1KG, quantite=3, prix=6.10" → quantite:3, conditionnement:1, unite:"kg"
+- "JAMBON 16 TRANCHES 30grs, quantite=4, prix=5.54" → quantite:4, conditionnement:16, unite:"piece"
+
+Retourne UNIQUEMENT un JSON valide sans aucun texte autour, sans backticks, sans markdown :
+{
+  "fournisseur": {
+    "nom": "",
+    "adresse": "",
+    "telephone": "",
+    "email": "",
+    "siret": "",
+    "siren": ""
+  },
+  "facture": {
+    "numero": "",
+    "date": "",
+    "echeance": "",
+    "delai_paiement_jours": 0,
+    "montant_total_ht": 0,
+    "montant_total_ttc": 0
+  },
+  "lignes": [
+    {
+      "reference": "",
+      "designation": "",
+      "conditionnement": 0,
+      "unite": "",
+      "prix_unitaire_ht": 0,
+      "quantite": 0,
+      "montant_ht": 0
+    }
+  ]
+}`,
             },
             {
               type: 'image_url',
@@ -255,7 +302,15 @@ export default function Factures() {
 
       const prixUnitaire = parseFloat(ligne.prix_unitaire_ht) || 0
       const conditionnement = parseFloat(ligne.conditionnement) || 1
-      const prixGUML = conditionnement ? (prixUnitaire / conditionnement) : 0
+      function getPrixBase(prix, conditionnement, unite) {
+          const u = (unite || '').toLowerCase().trim()
+          console.log('getPrixBase:', prix, conditionnement, unite, u)
+          if (u === 'kg') return prix / (conditionnement * 1000)
+          if (u === 'l') return prix / (conditionnement * 1000)
+          if (u === 'g' || u === 'ml') return prix / conditionnement
+          return prix / conditionnement
+        }
+        const prixGUML = getPrixBase(prixUnitaire, conditionnement, ligne.unite)
 
       if (lienExistant) {
         if (Math.abs((lienExistant.prix_actuel || 0) - prixUnitaire) > 0.01) {
@@ -461,8 +516,8 @@ async function deleteFacture() {
 
       {/* Modal détail */}
       {showDetail && selected && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-8">
+        <div className="fixed inset-0 bg-black/40 flex items-start justify-center z-50 overflow-y-auto py-8">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-lg font-bold text-gray-800">Vérification de la facture</h3>
               <button onClick={() => setShowDetail(false)}><X size={20} className="text-gray-400" /></button>
@@ -517,7 +572,8 @@ async function deleteFacture() {
       )}
 
       {showStockUpdate && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/40 z-50 overflow-y-auto">
+          <div className="min-h-full flex items-start justify-center py-8 px-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
             <h3 className="text-lg font-bold text-gray-800 mb-2">Mettre à jour le stock ?</h3>
             <p className="text-sm text-gray-500 mb-6">Cette facture ne correspond à aucune commande passée dans Orpailleur. Voulez-vous ajouter ces quantités au stock de la mercuriale ?</p>
@@ -525,7 +581,15 @@ async function deleteFacture() {
               {stockAMettreAJour.map((item, i) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
                   <span className="font-medium text-gray-700">{item.designation}</span>
-                  <span className="text-gray-600">+{item.quantiteEnUnite}{item.unite}</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                      value={item.quantiteEnUnite}
+                      onChange={e => setStockAMettreAJour(stockAMettreAJour.map((s, j) => j === i ? { ...s, quantiteEnUnite: parseFloat(e.target.value) || 0 } : s))}
+                    />
+                    <span className="text-gray-500 text-xs">{item.unite}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -537,6 +601,7 @@ async function deleteFacture() {
                 Mettre à jour le stock
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}
