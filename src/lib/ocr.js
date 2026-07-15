@@ -142,6 +142,10 @@ function fileToBase64(file) {
 // correcte (ex: motifs composés comme "10X125G" déjà bien résolus par le modèle en 1.25).
 function extraireConditionnementDesignation(designation) {
   if (!designation) return null
+  // On évite les motifs de type "20u x 5" (comptage de packs) ou toute mention de contenance
+  // d'un contenant (ex: "SACS POUBELLES 130L" = sacs POUR 130 litres, pas 130L de produit acheté) :
+  // dans ces cas le nombre+unité rencontré ne représente pas le conditionnement réel de l'article.
+  if (/\d+\s*u\s*x\s*\d+/i.test(designation)) return null
   const m = designation.match(/(\d+(?:[.,]\d+)?)\s*(KG|G|ML|L)\b/i)
   if (!m) return null
   let valeur = parseFloat(m[1].replace(',', '.'))
@@ -160,19 +164,23 @@ const MOTS_CLES_NON_PRODUIT = /FRAIS DE (TRANSPORT|PORT)|RISTOURNE|REMISE|ESCOMP
 
 function corrigerLignes(lignes) {
   if (!Array.isArray(lignes)) return []
-  const vues = []
   const result = []
   for (const ligne of lignes) {
     if (MOTS_CLES_NON_PRODUIT.test(ligne.designation || '')) continue
     const l = { ...ligne }
-    if (l.prix_unitaire_ht > 0 && l.montant_ht > 0) {
-      const quantiteCalculee = Math.round(l.montant_ht / l.prix_unitaire_ht)
+    const conditionnementActuel = parseFloat(l.conditionnement) || 1
+
+    // IMPORTANT : montant_ht = prix_unitaire_ht × conditionnement × quantite en général (le
+    // conditionnement agit comme multiplicateur quand le prix est au poids/volume/pièce de base
+    // plutôt qu'au colis complet — ex: prix au litre pour un pack de 12x1L). Diviser seulement par
+    // prix_unitaire_ht sans tenir compte du conditionnement donnerait quantite × conditionnement au
+    // lieu de quantite seul, ce qui double ensuite le calcul final (bug observé : quantités ×12, ×24...).
+    if (l.prix_unitaire_ht > 0 && l.montant_ht > 0 && conditionnementActuel > 0) {
+      const quantiteCalculee = Math.round(l.montant_ht / (l.prix_unitaire_ht * conditionnementActuel))
       const ecart = Math.abs(quantiteCalculee - l.quantite) / (l.quantite || 1)
-      // Ce garde-fou suppose que prix_unitaire_ht est un prix par colis/sac. Sur certaines factures
-      // (meunerie, vente au poids), le "Prix unitaire" imprimé est en réalité un prix à la tonne/au kg,
-      // ce qui rend ce ratio non pertinent (il donne un nombre de tonnes, pas un nombre de sacs).
-      // On ne fait donc jamais confiance à une correction qui ramènerait la quantité à 0 : une ligne
-      // facturée avec un montant positif correspond forcément à au moins 1 unité achetée.
+      // On ne fait jamais confiance à une correction qui ramènerait la quantité à 0 : une ligne
+      // facturée avec un montant positif correspond forcément à au moins 1 unité achetée (certaines
+      // factures affichent un prix au poids/tonne plutôt qu'au colis, ce qui peut fausser ce ratio).
       if (ecart > 0.05 && quantiteCalculee >= 1) l.quantite = quantiteCalculee
     }
 
@@ -184,22 +192,13 @@ function corrigerLignes(lignes) {
       }
     }
 
-    // On ne supprime une ligne que si elle est STRICTEMENT identique à une ligne déjà vue
-    // (même référence, même désignation, même montant, même conditionnement) — ça correspond à
-    // une vraie erreur de lecture (la même ligne du tableau lue deux fois par l'OCR).
-    // Des lignes qui partagent juste la référence/désignation mais avec un poids ou un montant
-    // différent (ex: plusieurs pièces d'un même produit pesées séparément, comme du saumon fumé
-    // vendu au poids) sont des lignes distinctes et légitimes : il ne faut jamais les fusionner
-    // ni en supprimer une, sous peine de perdre de la marchandise dans le calcul de stock.
-    const estDoublonExact = vues.some(v =>
-      v.reference === l.reference &&
-      v.designation === l.designation &&
-      Math.abs((v.montant_ht || 0) - (l.montant_ht || 0)) < 0.01 &&
-      Math.abs((v.conditionnement || 0) - (l.conditionnement || 0)) < 0.001
-    )
-    if (estDoublonExact) continue
-
-    vues.push(l)
+    // Pas de déduplication automatique par référence/désignation : une même désignation peut
+    // légitimement apparaître plusieurs fois dans une facture multi bons de livraison (plusieurs
+    // achats séparés du même article), y compris avec des quantités identiques par coïncidence.
+    // Supprimer une ligne sur cette seule base a déjà fait perdre de vrais achats. Si l'OCR répète
+    // réellement une ligne par erreur, l'agrégation par produit au moment de la mise à jour du stock
+    // (voir preparerMiseAJourStock) additionnera au pire une fois de trop — un risque plus faible et
+    // plus facile à repérer que la perte silencieuse d'un achat réel.
     result.push(l)
   }
   return result
