@@ -22,6 +22,7 @@ export default function Factures() {
   const [stockAMettreAJour, setStockAMettreAJour] = useState([])
   const [isValidating, setIsValidating] = useState(false)
   const [isUpdatingStock, setIsUpdatingStock] = useState(false)
+  const [totalLignesExtraites, setTotalLignesExtraites] = useState(0)
 
   useEffect(() => { fetchFactures() }, [])
 
@@ -277,8 +278,11 @@ export default function Factures() {
     let lignesFacture = []
     try { lignesFacture = JSON.parse(facture.lignes_extraites) } catch { return }
 
+    const lignesAvecDesignation = lignesFacture.filter(l => l.designation)
+    setTotalLignesExtraites(lignesAvecDesignation.length)
+
     const parMatierePremiere = new Map()
-    for (const ligne of lignesFacture) {
+    for (const ligne of lignesAvecDesignation) {
       if (!ligne.designation) continue
       const { data: lien } = await supabase
         .from('matieres_premieres_fournisseurs')
@@ -482,7 +486,14 @@ async function deleteFacture() {
           <div className="min-h-full flex items-start justify-center py-8 px-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
             <h3 className="text-lg font-bold text-gray-800 mb-2">Mettre à jour le stock ?</h3>
-            <p className="text-sm text-gray-500 mb-6">Cette facture ne correspond à aucune commande passée dans Orpailleur. Voulez-vous ajouter ces quantités au stock de la mercuriale ?</p>
+            <p className="text-sm text-gray-500 mb-3">Cette facture ne correspond à aucune commande passée dans Orpailleur. Voulez-vous ajouter ces quantités au stock de la mercuriale ?</p>
+            <div className="flex items-center gap-2 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-4">
+              <AlertCircle size={14} className="text-gray-400 shrink-0" />
+              <span>
+                {totalLignesExtraites} ligne(s) produit détectée(s) sur la facture — {stockAMettreAJour.length} associée(s) à un article existant de la mercuriale.
+                {totalLignesExtraites !== stockAMettreAJour.length && " Vérifie qu'aucun article n'est manquant."}
+              </span>
+            </div>
             <div className="space-y-2 mb-6">
               {stockAMettreAJour.map((item, i) => (
                 <div key={i} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">

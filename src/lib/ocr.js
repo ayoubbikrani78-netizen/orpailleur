@@ -95,7 +95,17 @@ RÈGLES POUR LES MONTANTS :
 - Le HT correct est toujours inférieur au TTC
 - Si le produit n'a pas de poids (boites, pièces, sachets), utilise "piece" comme unite et le nombre de pièces dans le colis comme conditionnement
 
-NUMÉRO DE FACTURE :
+RÈGLE CRITIQUE SUR LES COLONNES DE QUANTITÉ (factures meunerie/grossiste type "bon de livraison") :
+Certaines factures ont à la fois une colonne "Nombre sacs" (ou "Nombre colis") ET une colonne "Nombre tonnes" (ou "Poids total"). Ce sont deux choses différentes :
+- "quantite" doit TOUJOURS venir de la colonne "Nombre sacs"/"Nombre colis" (le nombre d'unités physiques achetées), JAMAIS de la colonne "Nombre tonnes"/"Poids total" (qui n'est qu'un total de vérification déjà calculé).
+- Exemple : ligne avec "Nombre sacs"=10, désignation "SENONE-25 kg", "Nombre tonnes"=0.250 -> quantite:10, conditionnement:25, unite:"kg" (PAS quantite:250, PAS quantite:0.25).
+- Autre exemple : "Nombre sacs"=1, désignation "DRAKKAR 25 kg", "Nombre tonnes"=0.025 -> quantite:1, conditionnement:25, unite:"kg" (PAS quantite:25).
+- Si tu vois une colonne de poids/tonnes total à côté d'une colonne de nombre de sacs/colis, utilise-la uniquement pour vérifier ta cohérence (nombre sacs × poids par sac ≈ poids total), jamais comme valeur de quantite.
+
+LIGNES À NE JAMAIS INCLURE DANS "lignes" (ce ne sont pas des produits à stocker) :
+Exclus complètement du tableau "lignes" toute ligne qui correspond à un frais, une remise ou un ajustement plutôt qu'à un produit physique : frais de transport/port, remises, ristournes, escomptes, acomptes, annulations, arrhes. Ces lignes ne doivent jamais apparaître dans "lignes", même si elles ont un montant.
+
+
 - Certains fournisseurs utilisent un numéro composite avec plusieurs blocs entre parenthèses (ex: "0/0(134)0055/023812 (055-042607)"). Dans ce cas, retiens le numéro complet tel qu'imprimé à côté de "N° FACTURE", sans le tronquer ni n'en garder qu'une partie.
 
 EXEMPLES :
@@ -137,11 +147,16 @@ function extraireConditionnementDesignation(designation) {
   return null
 }
 
+// Filet de sécurité déterministe : même si le modèle inclut par erreur une ligne de frais/remise/
+// ajustement dans "lignes", on l'exclut ici avant de ventiler quoi que ce soit vers la mercuriale.
+const MOTS_CLES_NON_PRODUIT = /FRAIS DE (TRANSPORT|PORT)|RISTOURNE|REMISE|ESCOMPTE|ACOMPTE|ANNULATION|ARRHES/i
+
 function corrigerLignes(lignes) {
   if (!Array.isArray(lignes)) return []
   const vues = []
   const result = []
   for (const ligne of lignes) {
+    if (MOTS_CLES_NON_PRODUIT.test(ligne.designation || '')) continue
     const l = { ...ligne }
     if (l.prix_unitaire_ht > 0 && l.montant_ht > 0) {
       const quantiteCalculee = Math.round(l.montant_ht / l.prix_unitaire_ht)
