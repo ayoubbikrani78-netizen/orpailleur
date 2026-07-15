@@ -28,7 +28,7 @@ export default function Fournisseurs() {
 
     const { data: factures } = await supabase
       .from('factures')
-      .select('fournisseur_id, montant_total_ht, created_at')
+      .select('fournisseur_id, montant_total_ht, created_at, date_facture')
       .eq('statut', 'validee')
 
     const montantTotal = (factures || []).reduce((sum, f) => sum + (parseFloat(f.montant_total_ht) || 0), 0)
@@ -39,8 +39,11 @@ export default function Fournisseurs() {
       if (!stats[f.fournisseur_id]) stats[f.fournisseur_id] = { nb_factures: 0, montant_total: 0, dernier_achat: null }
       stats[f.fournisseur_id].nb_factures++
       stats[f.fournisseur_id].montant_total += parseFloat(f.montant_total_ht) || 0
-      if (!stats[f.fournisseur_id].dernier_achat || f.created_at > stats[f.fournisseur_id].dernier_achat) {
-        stats[f.fournisseur_id].dernier_achat = f.created_at
+      // On se base sur la date réelle de la facture (date_facture), pas sur la date d'import (created_at),
+      // sinon une facture de mai importée en juillet apparaîtrait comme l'achat le plus récent à tort.
+      const dateAchat = f.date_facture || f.created_at
+      if (!stats[f.fournisseur_id].dernier_achat || dateAchat > stats[f.fournisseur_id].dernier_achat) {
+        stats[f.fournisseur_id].dernier_achat = dateAchat
       }
     }
 

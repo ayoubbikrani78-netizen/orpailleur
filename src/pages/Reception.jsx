@@ -1,69 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { ChevronRight, X, AlertTriangle, Check, Upload, Loader } from 'lucide-react'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-
-const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY
-
-async function pdfToImageBase64(file) {
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-  const page = await pdf.getPage(1)
-  const viewport = page.getViewport({ scale: 2 })
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  const ctx = canvas.getContext('2d')
-  await page.render({ canvasContext: ctx, viewport }).promise
-  return canvas.toDataURL('image/png').split(',')[1]
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result.split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
-
-async function extractInvoiceData(imageBase64) {
-  const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'pixtral-12b-2409',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Tu es un expert en lecture de factures fournisseurs pour une boulangerie. 
-              Extrais les informations suivantes de cette facture et retourne UNIQUEMENT un JSON valide sans aucun texte autour, sans backticks, sans markdown :
-              {
-                "fournisseur": { "nom": "", "adresse": "", "telephone": "", "email": "", "siret": "", "siren": "" },
-                "facture": { "numero": "", "date": "", "montant_total_ht": 0, "montant_total_ttc": 0 },
-                "lignes": [ { "reference": "", "designation": "", "conditionnement": 0, "unite": "", "prix_unitaire_ht": 0, "quantite": 0, "montant_ht": 0 } ]
-              }`
-            },
-            { type: 'image_url', image_url: `data:image/png;base64,${imageBase64}` }
-          ]
-        }
-      ]
-    })
-  })
-  const data = await response.json()
-  const content = data.choices[0].message.content
-  const clean = content.replace(/```json|```/g, '').trim()
-  return JSON.parse(clean)
-}
+import { extractInvoiceData, fileToBase64 } from '../lib/ocr'
 
 function normalizeDate(dateStr) {
   if (!dateStr) return null
@@ -155,8 +93,7 @@ async function openDetail(commande) {
       .single()
 
     try {
-      const imageBase64 = await pdfToImageBase64(file)
-      const extracted = await extractInvoiceData(imageBase64)
+      const { extracted, needsReview, confidence } = await extractInvoiceData(base64)
 
       await supabase.from('factures').update({
         numero: extracted.facture?.numero,
@@ -164,14 +101,20 @@ async function openDetail(commande) {
         montant_total_ht: extracted.facture?.montant_total_ht,
         montant_total_ttc: extracted.facture?.montant_total_ttc,
         lignes_extraites: JSON.stringify(extracted.lignes || []),
-        statut: 'validee'
+        statut: needsReview ? 'a_verifier' : 'validee',
+        extraction_incomplete: needsReview,
+        confiance_ocr: confidence
       }).eq('id', factureInserted.id)
 
       const { data: nouvelleFacture } = await supabase.from('factures').select('*').eq('id', factureInserted.id).single()
       setFactures([nouvelleFacture, ...factures])
       setFactureSelectionnee(nouvelleFacture)
     } catch (e) {
-      await supabase.from('factures').update({ statut: 'a_verifier' }).eq('id', factureInserted.id)
+      await supabase.from('factures').update({
+        statut: 'a_verifier',
+        extraction_incomplete: true,
+        confiance_ocr: 0
+      }).eq('id', factureInserted.id)
     }
     setUploadingFacture(false)
   }

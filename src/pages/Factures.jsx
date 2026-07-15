@@ -1,135 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Upload, FileText, Eye, X, Check, AlertCircle, Loader } from 'lucide-react'
-
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.mjs?url'
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
-
-const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY
-
-async function pdfToImageBase64(file) {
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
-  const numPages = pdf.numPages
-
-  const canvasFull = document.createElement('canvas')
-  const scale = numPages > 1 ? 1.5 : 2
-  let totalHeight = 0
-  let width = 0
-  const pageCanvases = []
-
-  for (let i = 1; i <= numPages; i++) {
-    const page = await pdf.getPage(i)
-    const viewport = page.getViewport({ scale })
-    const canvas = document.createElement('canvas')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    const ctx = canvas.getContext('2d')
-    await page.render({ canvasContext: ctx, viewport }).promise
-    pageCanvases.push(canvas)
-    totalHeight += viewport.height
-    width = Math.max(width, viewport.width)
-  }
-
-  canvasFull.width = width
-  canvasFull.height = totalHeight
-  const ctxFull = canvasFull.getContext('2d')
-  let y = 0
-  for (const c of pageCanvases) {
-    ctxFull.drawImage(c, 0, y)
-    y += c.height
-  }
-
-  return canvasFull.toDataURL('image/png').split(',')[1]
-}
-
-async function extractInvoiceData(imageBase64) {
-  const response = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${MISTRAL_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'pixtral-12b-2409',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Tu es un expert en lecture de factures fournisseurs pour une boulangerie française.
-              
-Lis attentivement cette facture et extrais les données en suivant ces règles STRICTES :
-
-RÈGLES POUR LES LIGNES PRODUITS :
-- "quantite" = nombre de colis/unités achetés tel qu'indiqué dans la colonne QUANTITE de la facture
-- "conditionnement" = poids ou volume TOTAL par colis (ex: si "1KG" alors 1, si "13 kg" alors 13, si "2kg" alors 2)
-- "unite" = unité du conditionnement : "kg" pour kilogrammes, "L" pour litres, "piece" pour unités sans poids
-- "prix_unitaire_ht" = prix unitaire HT (colonne P.U. NET ou P.U. BRUT)
-RÈGLES POUR LES MONTANTS :
-- "montant_total_ht" = cherche la ligne "HT" dans le tableau de ventilation TVA en bas de page, c'est le total HT réel
-- "montant_total_ttc" = "Net à Payer" ou "Total TTC" en bas de la dernière page
-- Ignore tous les sous-totaux intermédiaires comme "<< Montant de commande HT >>"
-- Ignore le "CUMUL FACTURES" qui inclut les factures précédentes
-- Le HT correct est toujours inférieur au TTC
-- Pour calculer le stock : quantite × conditionnement = stock total (ex: 10 unités × 1kg = 10kg)
-- Si le produit n'a pas de poids (ex: boites, pièces, sachets), utilise "piece" comme unite et le nombre de pièces dans le colis comme conditionnement
-
-EXEMPLES CONCRETS :
-- "MIX MOZZA 1kg, quantite=10, prix=5.80" → quantite:10, conditionnement:1, unite:"kg"
-- "ORANGE 15kg, quantite=2, prix=1.50" → quantite:2, conditionnement:15, unite:"kg"
-- "COCA COLA 33CLx24, quantite=2, prix=0.55" → quantite:2, conditionnement:24, unite:"piece"
-- "FRAISE 1KG, quantite=3, prix=6.10" → quantite:3, conditionnement:1, unite:"kg"
-- "JAMBON 16 TRANCHES 30grs, quantite=4, prix=5.54" → quantite:4, conditionnement:16, unite:"piece"
-
-Retourne UNIQUEMENT un JSON valide sans aucun texte autour, sans backticks, sans markdown :
-{
-  "fournisseur": {
-    "nom": "",
-    "adresse": "",
-    "telephone": "",
-    "email": "",
-    "siret": "",
-    "siren": ""
-  },
-  "facture": {
-    "numero": "",
-    "date": "",
-    "echeance": "",
-    "delai_paiement_jours": 0,
-    "montant_total_ht": 0,
-    "montant_total_ttc": 0
-  },
-  "lignes": [
-    {
-      "reference": "",
-      "designation": "",
-      "conditionnement": 0,
-      "unite": "",
-      "prix_unitaire_ht": 0,
-      "quantite": 0,
-      "montant_ht": 0
-    }
-  ]
-}`,
-            },
-            {
-              type: 'image_url',
-              image_url: `data:image/png;base64,${imageBase64}`
-            }
-          ]
-        }
-      ]
-    })
-  })
-  const data = await response.json()
-  const content = data.choices[0].message.content
-  const clean = content.replace(/```json|```/g, '').trim()
-  return JSON.parse(clean)
-}
+import { extractInvoiceData } from '../lib/ocr'
 
 const STATUT_CONFIG = {
   en_cours: { label: 'En cours de traitement', color: 'bg-blue-50 text-blue-500', icon: Loader },
@@ -148,6 +20,8 @@ export default function Factures() {
   const [dragOver, setDragOver] = useState(false)
   const [showStockUpdate, setShowStockUpdate] = useState(false)
   const [stockAMettreAJour, setStockAMettreAJour] = useState([])
+  const [isValidating, setIsValidating] = useState(false)
+  const [isUpdatingStock, setIsUpdatingStock] = useState(false)
 
   useEffect(() => { fetchFactures() }, [])
 
@@ -180,8 +54,7 @@ export default function Factures() {
       .single()
 
     try {
-      const imageBase64 = await pdfToImageBase64(file)
-      const extracted = await extractInvoiceData(imageBase64)
+      const { extracted, needsReview, confidence } = await extractInvoiceData(base64)
       let fournisseurId = null
 
       if (extracted.fournisseur?.nom) {
@@ -253,11 +126,17 @@ export default function Factures() {
         montant_total_ht: extracted.facture?.montant_total_ht,
         montant_total_ttc: extracted.facture?.montant_total_ttc,
         lignes_extraites: JSON.stringify(extracted.lignes || []),
-        statut: 'a_verifier'
+        statut: 'a_verifier',
+        extraction_incomplete: needsReview,
+        confiance_ocr: confidence
       }).eq('id', factureInserted.id)
 
     } catch (e) {
-      await supabase.from('factures').update({ statut: 'a_verifier' }).eq('id', factureInserted.id)
+      await supabase.from('factures').update({
+        statut: 'a_verifier',
+        extraction_incomplete: true,
+        confiance_ocr: 0
+      }).eq('id', factureInserted.id)
     }
   }
 
@@ -363,27 +242,33 @@ export default function Factures() {
   }
 
   async function validerFacture() {
+    if (isValidating) return
     if (selected.statut === 'validee') {
       alert('Cette facture a déjà été validée et ne peut pas être validée à nouveau.')
       setShowDetail(false)
       return
     }
 
-    await supabase.from('factures').update({
-      numero: extracted.numero,
-      date_facture: extracted.date_facture || null,
-      montant_total_ht: extracted.montant_total_ht,
-      montant_total_ttc: extracted.montant_total_ttc,
-      statut: 'validee'
-    }).eq('id', selected.id)
+    setIsValidating(true)
+    try {
+      await supabase.from('factures').update({
+        numero: extracted.numero,
+        date_facture: extracted.date_facture || null,
+        montant_total_ht: extracted.montant_total_ht,
+        montant_total_ttc: extracted.montant_total_ttc,
+        statut: 'validee'
+      }).eq('id', selected.id)
 
-    if (selected.fournisseur_id) {
-      await ventilerVersMercuriale(selected.id, selected.fournisseur_id)
-      await preparerMiseAJourStock(selected.id, selected.fournisseur_id)
+      if (selected.fournisseur_id) {
+        await ventilerVersMercuriale(selected.id, selected.fournisseur_id)
+        await preparerMiseAJourStock(selected.id, selected.fournisseur_id)
+      }
+
+      setShowDetail(false)
+      fetchFactures()
+    } finally {
+      setIsValidating(false)
     }
-
-    setShowDetail(false)
-    fetchFactures()
   }
 
   async function preparerMiseAJourStock(factureId, fournisseurId) {
@@ -392,7 +277,7 @@ export default function Factures() {
     let lignesFacture = []
     try { lignesFacture = JSON.parse(facture.lignes_extraites) } catch { return }
 
-    const stockUpdates = []
+    const parMatierePremiere = new Map()
     for (const ligne of lignesFacture) {
       if (!ligne.designation) continue
       const { data: lien } = await supabase
@@ -403,16 +288,25 @@ export default function Factures() {
         .maybeSingle()
 
       if (lien) {
-        stockUpdates.push({
-          matiere_premiere_id: lien.matiere_premiere_id,
-          designation: lien.matieres_premieres?.designation_interne,
-          unite: lien.matieres_premieres?.unite,
-          conditionnement: lien.conditionnement || 1,
-          quantiteCommandee: parseFloat(ligne.quantite) || 0,
-          quantiteEnUnite: (parseFloat(ligne.quantite) || 0) * (lien.conditionnement || 1)
-        })
+        // Une même matière première peut apparaître sur plusieurs lignes de facture (ex: plusieurs
+        // pièces d'un produit vendu au poids, pesées séparément) : on additionne les quantités
+        // plutôt que d'écraser, pour ne pas perdre de marchandise et afficher une seule ligne.
+        const quantiteAjoutee = Math.round((parseFloat(ligne.quantite) || 0) * (lien.conditionnement || 1) * 100) / 100
+        if (parMatierePremiere.has(lien.matiere_premiere_id)) {
+          const existant = parMatierePremiere.get(lien.matiere_premiere_id)
+          existant.quantiteEnUnite = Math.round((existant.quantiteEnUnite + quantiteAjoutee) * 100) / 100
+        } else {
+          parMatierePremiere.set(lien.matiere_premiere_id, {
+            matiere_premiere_id: lien.matiere_premiere_id,
+            designation: lien.matieres_premieres?.designation_interne,
+            unite: lien.matieres_premieres?.unite,
+            conditionnement: lien.conditionnement || 1,
+            quantiteEnUnite: quantiteAjoutee
+          })
+        }
       }
     }
+    const stockUpdates = Array.from(parMatierePremiere.values())
     if (stockUpdates.length > 0) {
       setStockAMettreAJour(stockUpdates)
       setShowStockUpdate(true)
@@ -420,19 +314,25 @@ export default function Factures() {
   }
 
   async function confirmerMiseAJourStock() {
-    for (const item of stockAMettreAJour) {
-      const { data: mp } = await supabase.from('matieres_premieres').select('quantite_stock').eq('id', item.matiere_premiere_id).single()
-      const nouveauStock = (mp?.quantite_stock || 0) + item.quantiteEnUnite
-      await supabase.from('matieres_premieres').update({ quantite_stock: nouveauStock }).eq('id', item.matiere_premiere_id)
-      await supabase.from('mouvements_stock').insert({
-        matiere_premiere_id: item.matiere_premiere_id,
-        type: 'reception',
-        quantite: item.quantiteEnUnite,
-        raison: 'Facture sans commande associée'
-      })
+    if (isUpdatingStock) return
+    setIsUpdatingStock(true)
+    try {
+      for (const item of stockAMettreAJour) {
+        const { data: mp } = await supabase.from('matieres_premieres').select('quantite_stock').eq('id', item.matiere_premiere_id).single()
+        const nouveauStock = (mp?.quantite_stock || 0) + item.quantiteEnUnite
+        await supabase.from('matieres_premieres').update({ quantite_stock: nouveauStock }).eq('id', item.matiere_premiere_id)
+        await supabase.from('mouvements_stock').insert({
+          matiere_premiere_id: item.matiere_premiere_id,
+          type: 'reception',
+          quantite: item.quantiteEnUnite,
+          raison: 'Facture sans commande associée'
+        })
+      }
+      setShowStockUpdate(false)
+      setStockAMettreAJour([])
+    } finally {
+      setIsUpdatingStock(false)
     }
-    setShowStockUpdate(false)
-    setStockAMettreAJour([])
   }
 
 async function deleteFacture() {
@@ -556,12 +456,18 @@ async function deleteFacture() {
                 ))}
 
                 <div className="flex gap-3 mt-4">
-  <button onClick={deleteFacture} className="px-4 py-2.5 rounded-lg text-red-500 text-sm font-medium hover:bg-red-50">
+  <button onClick={deleteFacture} disabled={isValidating} className="px-4 py-2.5 rounded-lg text-red-500 text-sm font-medium hover:bg-red-50 disabled:opacity-60 disabled:cursor-not-allowed">
     Supprimer
   </button>
   {selected.statut !== 'validee' && (
-    <button onClick={validerFacture} className="flex-1 py-2.5 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-      Valider la facture
+    <button
+      onClick={validerFacture}
+      disabled={isValidating}
+      className="flex-1 py-2.5 rounded-lg text-white text-sm font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      style={{ backgroundColor: '#C9A84C' }}
+    >
+      {isValidating && <Loader size={16} className="animate-spin" />}
+      {isValidating ? 'Validation en cours...' : 'Valider la facture'}
     </button>
   )}
 </div>
@@ -594,11 +500,17 @@ async function deleteFacture() {
               ))}
             </div>
             <div className="flex gap-3">
-              <button onClick={() => { setShowStockUpdate(false); setStockAMettreAJour([]) }} className="flex-1 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50">
+              <button onClick={() => { setShowStockUpdate(false); setStockAMettreAJour([]) }} disabled={isUpdatingStock} className="flex-1 py-2.5 rounded-lg border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed">
                 Ignorer
               </button>
-              <button onClick={confirmerMiseAJourStock} className="flex-1 py-2.5 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-                Mettre à jour le stock
+              <button
+                onClick={confirmerMiseAJourStock}
+                disabled={isUpdatingStock}
+                className="flex-1 py-2.5 rounded-lg text-white text-sm font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                style={{ backgroundColor: '#C9A84C' }}
+              >
+                {isUpdatingStock && <Loader size={16} className="animate-spin" />}
+                {isUpdatingStock ? 'Mise à jour en cours...' : 'Mettre à jour le stock'}
               </button>
             </div>
           </div>
