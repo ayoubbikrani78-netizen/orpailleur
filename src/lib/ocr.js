@@ -102,7 +102,14 @@ Certaines factures ont à la fois une colonne "Nombre sacs" (ou "Nombre colis") 
 - Autre exemple : "Nombre sacs"=1, désignation "DRAKKAR 25 kg", "Nombre tonnes"=0.025 -> quantite:1, conditionnement:25, unite:"kg" (PAS quantite:25).
 - Si tu vois une colonne de poids/tonnes total à côté d'une colonne de nombre de sacs/colis, utilise-la uniquement pour vérifier ta cohérence (nombre sacs × poids par sac ≈ poids total), jamais comme valeur de quantite.
 
-LIGNES À NE JAMAIS INCLURE DANS "lignes" (ce ne sont pas des produits à stocker) :
+RÈGLE CRITIQUE SUR LES CELLULES DÉSIGNATION MULTI-LIGNES :
+Certaines factures empilent plusieurs informations dans une seule cellule "Désignation" d'une même ligne de tableau : le nom du produit, PUIS des mentions de remise/ristourne, PUIS des notes de qualité (ex: "SENONE-25 kg", "RISTOURNE POUR PAIEMENT RAPIDE", "RISTOURNE EXCEPTIONNELLE", "** PRIX UNITAIRE NET", "Farine Label Rouge issue de blé CRC" empilés dans une seule cellule). Ceci reste UNE SEULE ligne produit dans le tableau, jamais plusieurs :
+- Prends uniquement le nom réel du produit (en général la toute première ligne de texte de la cellule, ex: "SENONE-25 kg") comme "designation".
+- Ignore complètement les mentions de ristourne/remise et les notes descriptives/qualité qui apparaissent en dessous dans la même cellule (ex: "Farine Label Rouge issue de blé CRC", "** PRIX UNITAIRE NET") — n'en fais JAMAIS une ligne séparée, ce ne sont pas des produits.
+- Les valeurs numériques (Nombre sacs, Nombre tonnes, Montant H.T.) à utiliser pour cette ligne sont celles alignées sur la même ligne de tableau que le nom du produit, même si plusieurs montants apparaissent empilés dans la colonne "Prix unitaire" (dans ce cas, prends le dernier de la pile, qui est le prix net après remises, souvent précédé de la mention "PRIX UNITAIRE NET" ou "** PRIX UNITAIRE NET").
+- Résultat attendu pour l'exemple ci-dessus : UNE seule ligne "SENONE-25 kg" avec quantite:10 (Nombre sacs), conditionnement:25, unite:"kg", montant_ht:185 (la valeur de la colonne Montant H.T., prise telle quelle) — et rien d'autre pour cette ligne du tableau.
+
+
 Exclus complètement du tableau "lignes" toute ligne qui correspond à un frais, une remise ou un ajustement plutôt qu'à un produit physique : frais de transport/port, remises, ristournes, escomptes, acomptes, annulations, arrhes. Ces lignes ne doivent jamais apparaître dans "lignes", même si elles ont un montant.
 
 
@@ -161,7 +168,12 @@ function corrigerLignes(lignes) {
     if (l.prix_unitaire_ht > 0 && l.montant_ht > 0) {
       const quantiteCalculee = Math.round(l.montant_ht / l.prix_unitaire_ht)
       const ecart = Math.abs(quantiteCalculee - l.quantite) / (l.quantite || 1)
-      if (ecart > 0.05) l.quantite = quantiteCalculee
+      // Ce garde-fou suppose que prix_unitaire_ht est un prix par colis/sac. Sur certaines factures
+      // (meunerie, vente au poids), le "Prix unitaire" imprimé est en réalité un prix à la tonne/au kg,
+      // ce qui rend ce ratio non pertinent (il donne un nombre de tonnes, pas un nombre de sacs).
+      // On ne fait donc jamais confiance à une correction qui ramènerait la quantité à 0 : une ligne
+      // facturée avec un montant positif correspond forcément à au moins 1 unité achetée.
+      if (ecart > 0.05 && quantiteCalculee >= 1) l.quantite = quantiteCalculee
     }
 
     if (!l.conditionnement || l.conditionnement === 1) {
