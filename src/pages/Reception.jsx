@@ -5,10 +5,17 @@ import { extractInvoiceData, fileToBase64 } from '../lib/ocr'
 
 function normalizeDate(dateStr) {
   if (!dateStr) return null
-  const match = dateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/)
-  if (match) return `${match[3]}-${match[2]}-${match[1]}`
-  const isoMatch = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/)
-  if (isoMatch) return dateStr
+  const s = dateStr.trim()
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`
+  m = s.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{4})/)
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`
+  m = s.match(/(\d{2})[\/\-](\d{2})[\/\-](\d{2})$/)
+  if (m) {
+    const anneeCourte = parseInt(m[3], 10)
+    const anneeComplete = anneeCourte < 70 ? 2000 + anneeCourte : 1900 + anneeCourte
+    return `${anneeComplete}-${m[2]}-${m[1]}`
+  }
   return null
 }
 
@@ -93,7 +100,25 @@ async function openDetail(commande) {
       .single()
 
     try {
-      const { extracted, needsReview, confidence } = await extractInvoiceData(base64)
+      const { extracted, needsReview, confidence, rawText } = await extractInvoiceData(base64)
+
+      if (extracted.facture?.numero && selected.fournisseur_id) {
+        const { data: existantes } = await supabase
+          .from('factures')
+          .select('id')
+          .eq('fournisseur_id', selected.fournisseur_id)
+          .eq('numero', extracted.facture.numero)
+          .neq('id', factureInserted.id)
+
+        const contientReliquat = /reliquat/i.test(rawText || '') || /reliquat/i.test(extracted.facture?.numero || '')
+
+        if (existantes && existantes.length > 0 && !contientReliquat) {
+          await supabase.from('factures').delete().eq('id', factureInserted.id)
+          setUploadingFacture(false)
+          alert(`Cette facture (n° ${extracted.facture.numero}) semble déjà avoir été importée pour ce fournisseur. Import annulé. Si c'est un reliquat légitime, vérifie que le mot "reliquat" apparaît sur le document.`)
+          return
+        }
+      }
 
       await supabase.from('factures').update({
         numero: extracted.facture?.numero,

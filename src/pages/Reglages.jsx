@@ -8,11 +8,17 @@ export default function Reglages() {
   })
   const [reglagesId, setReglagesId] = useState(null)
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [erreur, setErreur] = useState(null)
 
   useEffect(() => { fetchReglages() }, [])
 
   async function fetchReglages() {
-    const { data } = await supabase.from('reglages').select('*').limit(1).single()
+    const { data, error } = await supabase.from('reglages').select('*').limit(1).maybeSingle()
+    if (error) {
+      console.error('Erreur chargement réglages:', error)
+      return
+    }
     if (data) {
       setReglagesId(data.id)
       setForm({
@@ -28,14 +34,28 @@ export default function Reglages() {
   }
 
   async function saveReglages() {
-    if (reglagesId) {
-      await supabase.from('reglages').update(form).eq('id', reglagesId)
-    } else {
-      const { data } = await supabase.from('reglages').insert(form).select().single()
-      setReglagesId(data.id)
+    if (saving) return
+    setSaving(true)
+    setErreur(null)
+    try {
+      let error
+      if (reglagesId) {
+        ({ error } = await supabase.from('reglages').update(form).eq('id', reglagesId))
+      } else {
+        const res = await supabase.from('reglages').insert(form).select().single()
+        error = res.error
+        if (!error && res.data) setReglagesId(res.data.id)
+      }
+      if (error) {
+        console.error('Erreur sauvegarde réglages:', error)
+        setErreur(error.message || "Échec de l'enregistrement, réessaie.")
+        return
+      }
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } finally {
+      setSaving(false)
     }
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
   }
 
   return (
@@ -78,10 +98,16 @@ export default function Reglages() {
         </div>
 
         <div className="flex items-center gap-3 mt-6">
-          <button onClick={saveReglages} className="px-6 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-            Enregistrer
+          <button
+            onClick={saveReglages}
+            disabled={saving}
+            className="px-6 py-2 rounded-lg text-white text-sm font-medium cursor-pointer transition-opacity hover:opacity-90 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ backgroundColor: '#C9A84C' }}
+          >
+            {saving ? 'Enregistrement...' : 'Enregistrer'}
           </button>
           {saved && <span className="text-sm text-green-500 font-medium">✓ Sauvegardé</span>}
+          {erreur && <span className="text-sm text-red-500 font-medium">{erreur}</span>}
         </div>
       </div>
     </div>
