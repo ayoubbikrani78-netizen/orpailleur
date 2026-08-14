@@ -1,10 +1,12 @@
 import { NavLink } from 'react-router-dom'
-import { FileText, Users, ShoppingBag, Truck, Bell, BarChart2, Settings } from 'lucide-react'
+import { FileText, Users, ShoppingBag, Truck, Bell, BarChart2, Settings, ChefHat, Calculator } from 'lucide-react'
 
 const nav = [
   { to: '/factures', label: 'Corbeille factures', icon: FileText },
   { to: '/fournisseurs', label: 'Catalogue fournisseurs', icon: Users },
   { to: '/mercuriale', label: 'Mercuriale', icon: BarChart2 },
+  { to: '/recettes', label: 'Recettes', icon: ChefHat },
+  { to: '/cout-revient', label: 'Coût de revient', icon: Calculator },
   { to: '/commandes', label: 'Commandes', icon: ShoppingBag },
   { to: '/reception', label: 'Réception', icon: Truck },
   { to: '/alertes', label: 'Alertes', icon: Bell },

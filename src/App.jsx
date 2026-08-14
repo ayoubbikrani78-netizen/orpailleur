@@ -3,6 +3,8 @@ import Sidebar from './components/Sidebar'
 import Factures from './pages/Factures'
 import Fournisseurs from './pages/Fournisseurs'
 import Mercuriale from './pages/Mercuriale'
+import Recettes from './pages/Recettes'
+import CoutRevient from './pages/CoutRevient'
 import Commandes from './pages/Commandes'
 import Reception from './pages/Reception'
 import Alertes from './pages/Alertes'
@@ -19,6 +21,8 @@ export default function App() {
             <Route path="/factures" element={<Factures />} />
             <Route path="/fournisseurs" element={<Fournisseurs />} />
             <Route path="/mercuriale" element={<Mercuriale />} />
+            <Route path="/recettes" element={<Recettes />} />
+            <Route path="/cout-revient" element={<CoutRevient />} />
             <Route path="/commandes" element={<Commandes />} />
             <Route path="/reception" element={<Reception />} />
             <Route path="/alertes" element={<Alertes />} />
