@@ -50,9 +50,13 @@ export default function CoutRevient() {
     const elementsParRecetteId = {}
     for (const el of elementsAll) (elementsParRecetteId[el.recette_id] ||= []).push(el)
     const ingredientsParElementId = {}
-    for (const ing of ingredientsAll) (ingredientsParElementId[ing.element_id] ||= []).push(ing)
+    const ingredientsDirectsParRecetteId = {}
+    for (const ing of ingredientsAll) {
+      if (ing.element_id) (ingredientsParElementId[ing.element_id] ||= []).push(ing)
+      else if (ing.recette_id) (ingredientsDirectsParRecetteId[ing.recette_id] ||= []).push(ing)
+    }
     const tauxHoraireParAtelier = Object.fromEntries(ateliers.map((a) => [a.id, a.taux_horaire]))
-    return { matieresById, recettesParMpId, elementsParRecetteId, ingredientsParElementId, tauxHoraireParAtelier, bareme, perteDefaut: reglages.perte_defaut }
+    return { matieresById, recettesParMpId, elementsParRecetteId, ingredientsParElementId, ingredientsDirectsParRecetteId, tauxHoraireParAtelier, bareme, perteDefaut: reglages.perte_defaut }
   }, [matieres, recettes, elementsAll, ingredientsAll, ateliers, bareme, reglages])
 
   const lignes = useMemo(() => recettes.map((r) => {
@@ -64,9 +68,14 @@ export default function CoutRevient() {
         return { ...ing, cmup, mp: ctx.matieresById[ing.matiere_premiere_id] }
       }),
     }))
+    const ingredientsDirects = (ctx.ingredientsDirectsParRecetteId[r.id] || []).map((ing) => {
+      let cmup = 0
+      try { cmup = resoudreCmup(ing.matiere_premiere_id, ctx) } catch { cmup = 0 }
+      return { ...ing, cmup, mp: ctx.matieresById[ing.matiere_premiere_id] }
+    })
     const calc = calculerCoutRevient(r, {
       tauxHoraire: ctx.tauxHoraireParAtelier[r.atelier_id] || 0,
-      bareme, perteDefaut: reglages.perte_defaut, elements,
+      bareme, perteDefaut: reglages.perte_defaut, elements, ingredientsDirects,
     })
     const tva = r.tva_pct ?? reglages.tva_defaut
     const marque = tauxMarque(calc.coutRevientU, r.pv_ttc, tva)

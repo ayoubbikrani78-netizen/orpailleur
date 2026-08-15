@@ -58,19 +58,22 @@ export function quantiteEnBase(quantite, uniteSaisie, mpUnite) {
 }
 
 /**
- * Coût matière total d'une recette = somme de tous les éléments/ingrédients.
+ * Coût matière total d'une recette = somme des éléments (sous-recettes)
+ * + somme des ingrédients rattachés directement à la recette.
  * `elements` : [{ ingredients: [{ quantite, unite, cmup, mp: { unite } }] }]
- * La conversion d'unité (kg->g, L->ml) est appliquée ici, une seule fois,
- * pour que tous les appelants (Recettes, Coût de revient) restent cohérents.
+ * `ingredientsDirects` : [{ quantite, unite, cmup, mp: { unite } }]
  */
-export function coutMatiereRecette(elements) {
-  return (elements || []).reduce((total, el) => {
-    const sousTotal = (el.ingredients || []).reduce((s, ing) => {
-      const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
-      return s + qteBase * (Number(ing.cmup) || 0)
-    }, 0)
-    return total + sousTotal
+export function coutLigneIngredients(ingredients) {
+  return (ingredients || []).reduce((s, ing) => {
+    const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
+    return s + qteBase * (Number(ing.cmup) || 0)
   }, 0)
+}
+
+export function coutMatiereRecette(elements, ingredientsDirects) {
+  const totalElements = (elements || []).reduce((total, el) => total + coutLigneIngredients(el.ingredients), 0)
+  const totalDirects = coutLigneIngredients(ingredientsDirects)
+  return totalElements + totalDirects
 }
 
 /**
@@ -82,8 +85,8 @@ export function coutMatiereRecette(elements) {
  *   -> la MO et l'énergie sont divisées par Volume prod. (le temps de travail
  *      d'une fournée ne dépend pas linéairement du nombre de pièces dedans)
  */
-export function calculerCoutRevient(recette, { tauxHoraire, bareme, perteDefaut, elements }) {
-  const matiereRecette = coutMatiereRecette(elements)
+export function calculerCoutRevient(recette, { tauxHoraire, bareme, perteDefaut, elements, ingredientsDirects }) {
+  const matiereRecette = coutMatiereRecette(elements, ingredientsDirects)
   const qteProduit = Number(recette.qte_produit) || 1
   const volumeProd = Number(recette.volume_prod) || qteProduit || 1
   const matiereU = matiereRecette / qteProduit
@@ -153,12 +156,18 @@ export function resoudreCmup(matierePremiereId, ctx, dejaVus = new Set()) {
       mp: ctx.matieresById[ing.matiere_premiere_id],
     })),
   }))
+  const ingredientsDirects = (ctx.ingredientsDirectsParRecetteId[composant.id] || []).map((ing) => ({
+    ...ing,
+    cmup: resoudreCmup(ing.matiere_premiere_id, ctx, vus),
+    mp: ctx.matieresById[ing.matiere_premiere_id],
+  }))
 
   const { coutRevientU } = calculerCoutRevient(composant, {
     tauxHoraire: ctx.tauxHoraireParAtelier[composant.atelier_id] || 0,
     bareme: ctx.bareme,
     perteDefaut: ctx.perteDefaut,
     elements,
+    ingredientsDirects,
   })
   return coutRevientU
 }

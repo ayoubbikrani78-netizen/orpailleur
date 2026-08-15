@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calculerCoutRevient, resoudreCmup, uniteesCompatibles, quantiteEnBase } from '../lib/coutRevient'
-import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle } from 'lucide-react'
+import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers } from 'lucide-react'
 
 const EMPTY_RECETTE = {
   famille: '', nom: '', atelier_id: '', qte_produit: 1, volume_prod: 1,
@@ -23,9 +23,12 @@ export default function Recettes() {
   const [form, setForm] = useState(EMPTY_RECETTE)
   const [query, setQuery] = useState('')
   const [newElementNom, setNewElementNom] = useState('')
+  const [showElements, setShowElements] = useState(false)
   const [newIngredientByElement, setNewIngredientByElement] = useState({})
+  const [newIngredientDirect, setNewIngredientDirect] = useState(EMPTY_INGREDIENT)
 
   useEffect(() => { fetchAll() }, [])
+  useEffect(() => { setShowElements(false) }, [selectedId])
 
   async function fetchAll() {
     setLoading(true)
@@ -60,30 +63,39 @@ export default function Recettes() {
       (elementsParRecetteId[el.recette_id] ||= []).push(el)
     }
     const ingredientsParElementId = {}
+    const ingredientsDirectsParRecetteId = {}
     for (const ing of ingredientsAll) {
-      (ingredientsParElementId[ing.element_id] ||= []).push(ing)
+      if (ing.element_id) (ingredientsParElementId[ing.element_id] ||= []).push(ing)
+      else if (ing.recette_id) (ingredientsDirectsParRecetteId[ing.recette_id] ||= []).push(ing)
     }
     const tauxHoraireParAtelier = Object.fromEntries(ateliers.map((a) => [a.id, a.taux_horaire]))
-    return { matieresById, recettesParMpId, elementsParRecetteId, ingredientsParElementId, tauxHoraireParAtelier, bareme, perteDefaut }
+    return { matieresById, recettesParMpId, elementsParRecetteId, ingredientsParElementId, ingredientsDirectsParRecetteId, tauxHoraireParAtelier, bareme, perteDefaut }
   }, [matieres, recettes, elementsAll, ingredientsAll, ateliers, bareme, perteDefaut])
+
+  function resoudreIngredient(ing) {
+    let cmup = 0, erreur = null
+    try { cmup = resoudreCmup(ing.matiere_premiere_id, ctx) } catch (e) { erreur = e.message }
+    return { ...ing, cmup, erreur, mp: ctx.matieresById[ing.matiere_premiere_id] }
+  }
 
   function elementsAvecCmup(recetteId) {
     return (ctx.elementsParRecetteId[recetteId] || []).map((el) => ({
       ...el,
-      ingredients: (ctx.ingredientsParElementId[el.id] || []).map((ing) => {
-        let cmup = 0, erreur = null
-        try { cmup = resoudreCmup(ing.matiere_premiere_id, ctx) } catch (e) { erreur = e.message }
-        return { ...ing, cmup, erreur, mp: ctx.matieresById[ing.matiere_premiere_id] }
-      }),
+      ingredients: (ctx.ingredientsParElementId[el.id] || []).map(resoudreIngredient),
     }))
+  }
+
+  function ingredientsDirectsAvecCmup(recetteId) {
+    return (ctx.ingredientsDirectsParRecetteId[recetteId] || []).map(resoudreIngredient)
   }
 
   const selected = recettes.find((r) => r.id === selectedId) || null
   const selectedElements = selected ? elementsAvecCmup(selected.id) : []
+  const selectedIngredientsDirects = selected ? ingredientsDirectsAvecCmup(selected.id) : []
   const selectedCalc = selected
     ? calculerCoutRevient(selected, {
         tauxHoraire: ctx.tauxHoraireParAtelier[selected.atelier_id] || 0,
-        bareme, perteDefaut, elements: selectedElements,
+        bareme, perteDefaut, elements: selectedElements, ingredientsDirects: selectedIngredientsDirects,
       })
     : null
 
@@ -148,6 +160,20 @@ export default function Recettes() {
       unite: draft.unite || mp?.unite || 'g',
     })
     setNewIngredientByElement({ ...newIngredientByElement, [elementId]: EMPTY_INGREDIENT })
+    fetchAll()
+  }
+
+  async function addIngredientDirect() {
+    const draft = newIngredientDirect
+    if (!draft.matiere_premiere_id || !draft.quantite) return
+    const mp = ctx.matieresById[draft.matiere_premiere_id]
+    await supabase.from('recette_ingredients').insert({
+      recette_id: selected.id,
+      matiere_premiere_id: draft.matiere_premiere_id,
+      quantite: parseFloat(draft.quantite),
+      unite: draft.unite || mp?.unite || 'g',
+    })
+    setNewIngredientDirect(EMPTY_INGREDIENT)
     fetchAll()
   }
 
@@ -242,69 +268,73 @@ export default function Recettes() {
                   <span>Perte <b className="text-gray-700">{(selectedCalc.perte * 100).toFixed(0)}%</b></span>
                 </div>
 
-                {/* Éléments */}
-                <div className="space-y-4">
-                  {selectedElements.map((el) => {
-                    const draft = newIngredientByElement[el.id] || EMPTY_INGREDIENT
-                    const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp?.unite) * i.cmup, 0)
-                    return (
-                      <div key={el.id} className="border border-gray-200 rounded-lg">
-                        <div className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-t-lg">
-                          <span className="text-sm font-semibold text-gray-700">{el.nom}</span>
-                          <div className="flex items-center gap-3">
-                            <span className="text-xs text-gray-400">{elTotal.toFixed(3)} €</span>
-                            <button onClick={() => deleteElement(el.id)}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button>
-                          </div>
-                        </div>
-                        <table className="w-full text-sm">
-                          <tbody>
-                            {el.ingredients.map((ing) => {
-                              const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
-                              return (
-                                <tr key={ing.id} className="border-t border-gray-100">
-                                  <td className="px-4 py-2 text-gray-700">
-                                    {ing.mp?.designation_interne || '—'}
-                                    {ing.erreur && <span className="ml-2 text-red-500 text-xs">⚠ {ing.erreur}</span>}
-                                  </td>
-                                  <td className="px-2 py-2 text-right text-gray-500 w-24">{ing.quantite} {ing.unite}</td>
-                                  <td className="px-2 py-2 text-right text-gray-500 w-28">× {ing.cmup.toFixed(5)}€/{ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''}</td>
-                                  <td className="px-4 py-2 text-right font-medium text-gray-700 w-20">{(qteBase * ing.cmup).toFixed(3)}€</td>
-                                  <td className="pr-3 w-8"><button onClick={() => deleteIngredient(ing.id)}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
-                                </tr>
-                              )
-                            })}
-                          </tbody>
-                        </table>
-                        <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100">
-                          <select className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={draft.matiere_premiere_id} onChange={(e) => {
-                            const mp = ctx.matieresById[e.target.value]
-                            const options = uniteesCompatibles(mp?.unite)
-                            setNewIngredientByElement({ ...newIngredientByElement, [el.id]: { ...draft, matiere_premiere_id: e.target.value, unite: options[0] } })
-                          }}>
-                            <option value="">Ajouter un ingrédient (Mercuriale)...</option>
-                            {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
-                          </select>
-                          <input type="number" placeholder="Qté" className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={draft.quantite} onChange={(e) => setNewIngredientByElement({ ...newIngredientByElement, [el.id]: { ...draft, quantite: e.target.value } })} />
-                          {draft.matiere_premiere_id && uniteesCompatibles(ctx.matieresById[draft.matiere_premiere_id]?.unite).length > 1 ? (
-                            <select className="w-16 border border-gray-200 rounded-lg px-1 py-1.5 text-xs" value={draft.unite} onChange={(e) => setNewIngredientByElement({ ...newIngredientByElement, [el.id]: { ...draft, unite: e.target.value } })}>
-                              {uniteesCompatibles(ctx.matieresById[draft.matiere_premiere_id]?.unite).map((u) => <option key={u} value={u}>{u}</option>)}
-                            </select>
-                          ) : (
-                            <span className="text-xs text-gray-400 w-8">{draft.unite}</span>
-                          )}
-                          <button onClick={() => addIngredient(el.id)} className="p-1.5 rounded-lg text-white" style={{ backgroundColor: '#C9A84C' }}><Plus size={13} /></button>
-                        </div>
-                      </div>
-                    )
-                  })}
+                {/* Ingrédients directs — le cas simple, sans élément */}
+                <div className="border border-gray-200 rounded-lg mb-4">
+                  <div className="px-4 py-2 bg-gray-50 rounded-t-lg">
+                    <span className="text-sm font-semibold text-gray-700">Ingrédients</span>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {selectedIngredientsDirects.map((ing) => (
+                        <IngredientRow key={ing.id} ing={ing} onDelete={() => deleteIngredient(ing.id)} />
+                      ))}
+                      {selectedIngredientsDirects.length === 0 && (
+                        <tr><td colSpan={5} className="px-4 py-3 text-gray-400 text-xs">Aucun ingrédient direct pour l'instant.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <IngredientPicker
+                    matieres={matieres} ctx={ctx} draft={newIngredientDirect}
+                    setDraft={setNewIngredientDirect} onAdd={addIngredientDirect}
+                  />
+                </div>
 
+                {/* Éléments (sous-recettes) — optionnel, pour les recettes à plusieurs couches */}
+                {selectedElements.length > 0 && (
+                  <div className="space-y-4 mb-4">
+                    {selectedElements.map((el) => {
+                      const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp?.unite) * i.cmup, 0)
+                      return (
+                        <div key={el.id} className="border border-gray-200 rounded-lg">
+                          <div className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-t-lg">
+                            <span className="text-sm font-semibold text-gray-700">{el.nom}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs text-gray-400">{elTotal.toFixed(3)} €</span>
+                              <button onClick={() => deleteElement(el.id)}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button>
+                            </div>
+                          </div>
+                          <table className="w-full text-sm">
+                            <tbody>
+                              {el.ingredients.map((ing) => (
+                                <IngredientRow key={ing.id} ing={ing} onDelete={() => deleteIngredient(ing.id)} />
+                              ))}
+                            </tbody>
+                          </table>
+                          <IngredientPicker
+                            matieres={matieres} ctx={ctx}
+                            draft={newIngredientByElement[el.id] || EMPTY_INGREDIENT}
+                            setDraft={(d) => setNewIngredientByElement({ ...newIngredientByElement, [el.id]: d })}
+                            onAdd={() => addIngredient(el.id)}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Lien discret pour les recettes à plusieurs couches (entremets, etc.) */}
+                {!showElements && selectedElements.length === 0 ? (
+                  <button onClick={() => setShowElements(true)} className="flex items-center gap-1.5 text-xs font-medium text-gray-400 hover:text-gray-600">
+                    <Layers size={13} /> Cette recette a plusieurs préparations (biscuit, crème...) ? Ajouter un élément
+                  </button>
+                ) : (
                   <div className="flex items-center gap-2">
                     <input placeholder="Nom du nouvel élément (ex : Biscuit, Ganache...)" className="flex-1 border border-dashed border-gray-300 rounded-lg px-3 py-2 text-sm" value={newElementNom} onChange={(e) => setNewElementNom(e.target.value)} />
                     <button onClick={addElement} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 border border-dashed border-gray-300">
                       <Plus size={14} /> Ajouter
                     </button>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </div>
@@ -360,6 +390,53 @@ function Field({ label, children }) {
     <div>
       <label className="text-xs font-medium text-gray-500 mb-1 block">{label}</label>
       {children}
+    </div>
+  )
+}
+
+function IngredientRow({ ing, onDelete }) {
+  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
+  const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
+  return (
+    <tr className="border-t border-gray-100 first:border-t-0">
+      <td className="px-4 py-2 text-gray-700">
+        {ing.mp?.designation_interne || '—'}
+        {ing.erreur && <span className="ml-2 text-red-500 text-xs">⚠ {ing.erreur}</span>}
+      </td>
+      <td className="px-2 py-2 text-right text-gray-500 w-24">{ing.quantite} {ing.unite}</td>
+      <td className="px-2 py-2 text-right text-gray-500 w-28">× {ing.cmup.toFixed(5)}€/{uniteBaseLabel}</td>
+      <td className="px-4 py-2 text-right font-medium text-gray-700 w-20">{(qteBase * ing.cmup).toFixed(3)}€</td>
+      <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
+    </tr>
+  )
+}
+
+// Ligne de saisie réutilisée pour les ingrédients directs ET ceux d'un élément
+function IngredientPicker({ matieres, ctx, draft, setDraft, onAdd }) {
+  const mpSelectionnee = draft.matiere_premiere_id ? ctx.matieresById[draft.matiere_premiere_id] : null
+  const options = mpSelectionnee ? uniteesCompatibles(mpSelectionnee.unite) : []
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100">
+      <select
+        className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-xs"
+        value={draft.matiere_premiere_id}
+        onChange={(e) => {
+          const mp = ctx.matieresById[e.target.value]
+          setDraft({ ...draft, matiere_premiere_id: e.target.value, unite: uniteesCompatibles(mp?.unite)[0] })
+        }}
+      >
+        <option value="">Ajouter un ingrédient (Mercuriale)...</option>
+        {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
+      </select>
+      <input type="number" placeholder="Qté" className="w-20 border border-gray-200 rounded-lg px-2 py-1.5 text-xs" value={draft.quantite} onChange={(e) => setDraft({ ...draft, quantite: e.target.value })} />
+      {options.length > 1 ? (
+        <select className="w-16 border border-gray-200 rounded-lg px-1 py-1.5 text-xs" value={draft.unite} onChange={(e) => setDraft({ ...draft, unite: e.target.value })}>
+          {options.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+      ) : (
+        <span className="text-xs text-gray-400 w-8">{draft.unite}</span>
+      )}
+      <button onClick={onAdd} className="p-1.5 rounded-lg text-white" style={{ backgroundColor: '#C9A84C' }}><Plus size={13} /></button>
     </div>
   )
 }
