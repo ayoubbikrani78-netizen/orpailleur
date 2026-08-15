@@ -38,7 +38,7 @@ export function uniteBaseDe(mpUnite) {
 export function uniteesCompatibles(mpUnite) {
   const base = uniteBaseDe(mpUnite)
   if (base === 'g') return ['g', 'kg']
-  if (base === 'ml') return ['ml', 'L']
+  if (base === 'ml') return ['ml', 'cl', 'L']
   return [base]
 }
 
@@ -49,6 +49,7 @@ export function facteurVersBase(uniteSaisie, mpUnite) {
   if (u === base.toLowerCase()) return 1
   if (base === 'g' && u === 'kg') return 1000
   if (base === 'ml' && u === 'l') return 1000
+  if (base === 'ml' && u === 'cl') return 10
   return 1 // unité inconnue -> on suppose déjà l'unité de base, par sécurité
 }
 

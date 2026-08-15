@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calculerCoutRevient, resoudreCmup, uniteesCompatibles, quantiteEnBase } from '../lib/coutRevient'
-import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers } from 'lucide-react'
+import ImporterRecetteModal from '../components/ImporterRecetteModal'
+import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers, Upload } from 'lucide-react'
 
 const EMPTY_RECETTE = {
   famille: '', nom: '', atelier_id: '', qte_produit: 1, volume_prod: 1,
@@ -20,6 +21,7 @@ export default function Recettes() {
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
   const [showForm, setShowForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [form, setForm] = useState(EMPTY_RECETTE)
   const [query, setQuery] = useState('')
   const [newElementNom, setNewElementNom] = useState('')
@@ -186,9 +188,14 @@ export default function Recettes() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Recettes</h2>
-        <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-          <Plus size={16} /> Nouvelle recette
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowImport(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200">
+            <Upload size={16} /> Importer un fichier
+          </button>
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
+            <Plus size={16} /> Nouvelle recette
+          </button>
+        </div>
       </div>
 
       {loading ? <p className="text-gray-400">Chargement...</p> : (
@@ -380,6 +387,19 @@ export default function Recettes() {
             </div>
           </div>
         </div>
+      )}
+
+      {showImport && (
+        <ImporterRecetteModal
+          matieres={matieres}
+          ateliers={ateliers}
+          onClose={() => setShowImport(false)}
+          onImported={async (nouvelId) => {
+            setShowImport(false)
+            await fetchAll()
+            setSelectedId(nouvelId)
+          }}
+        />
       )}
     </div>
   )
