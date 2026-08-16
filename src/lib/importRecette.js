@@ -11,6 +11,7 @@
 
 import mammoth from 'mammoth'
 import * as XLSX from 'xlsx'
+import { supabase } from './supabase'
 
 const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY
 
@@ -186,24 +187,65 @@ function normaliserTexte(s) {
 }
 
 /**
- * Cherche la matière première la plus proche par similarité de mots (Jaccard).
- * Retourne null si aucune n'est suffisamment proche — l'utilisateur choisit alors lui-même.
+ * Cherche la matière première la plus proche par chevauchement de mots :
+ * le score mesure la part des mots du terme le plus court retrouvée dans l'autre,
+ * ce qui permet à "Beurre" de matcher "Beurre doux AOP Charentes" (désignation
+ * abrégée, cas fréquent dans les recettes) sans pénaliser les mots en trop côté Mercuriale.
+ *
+ * Sécurité : si plusieurs matières sont candidates à un score proche du meilleur
+ * (ambiguïté réelle, ex: "Sucre" face à "Sucre cristal" ET "Sucre glace"), on
+ * retourne null plutôt que de deviner — l'utilisateur choisit alors lui-même.
  */
-export function suggererMatierePremiere(designation, matieres, seuil = 0.4) {
+export function suggererMatierePremiere(designation, matieres, seuil = 0.6, margeAmbiguite = 0.15) {
   const mots = new Set(normaliserTexte(designation))
   if (mots.size === 0) return null
-  let meilleur = null
-  let meilleurScore = 0
-  for (const mp of matieres) {
-    const motsMp = new Set(normaliserTexte(mp.designation_interne))
-    if (motsMp.size === 0) continue
-    const intersection = [...mots].filter((m) => motsMp.has(m)).length
-    const union = new Set([...mots, ...motsMp]).size
-    const score = union ? intersection / union : 0
-    if (score > meilleurScore) {
-      meilleurScore = score
-      meilleur = mp
+
+  const scores = matieres
+    .map((mp) => {
+      const motsMp = new Set(normaliserTexte(mp.designation_interne))
+      if (motsMp.size === 0) return { mp, score: 0 }
+      const intersection = [...mots].filter((m) => motsMp.has(m)).length
+      const plusPetit = Math.min(mots.size, motsMp.size)
+      const score = plusPetit ? intersection / plusPetit : 0
+      return { mp, score }
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+
+  if (scores.length === 0 || scores[0].score < seuil) return null
+  const concurrents = scores.filter((s) => scores[0].score - s.score <= margeAmbiguite)
+  if (concurrents.length > 1) return null // ambigu -> à choisir manuellement
+
+  return scores[0].mp
+}
+
+/**
+ * Tente de rapprocher automatiquement toutes les lignes d'ingrédients "en attente"
+ * (designation_brute renseignée, matiere_premiere_id encore vide) avec les articles
+ * Mercuriale actuels. Ne force jamais un rapprochement ambigu — voir suggererMatierePremiere.
+ * À appeler après toute création d'article (nouvelle facture, ajout manuel en Mercuriale)
+ * et disponible aussi comme action manuelle depuis la page Recettes.
+ */
+export async function reconcilierIngredientsEnAttente() {
+  const { data: enAttente } = await supabase
+    .from('recette_ingredients')
+    .select('id, designation_brute')
+    .is('matiere_premiere_id', null)
+    .not('designation_brute', 'is', null)
+
+  if (!enAttente || enAttente.length === 0) return { rapproches: 0, total: 0 }
+
+  const { data: matieres } = await supabase
+    .from('matieres_premieres')
+    .select('id, designation_interne')
+
+  let rapproches = 0
+  for (const ligne of enAttente) {
+    const match = suggererMatierePremiere(ligne.designation_brute, matieres || [])
+    if (match) {
+      await supabase.from('recette_ingredients').update({ matiere_premiere_id: match.id }).eq('id', ligne.id)
+      rapproches++
     }
   }
-  return meilleurScore >= seuil ? meilleur : null
+  return { rapproches, total: enAttente.length }
 }

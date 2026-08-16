@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calculerCoutRevient, resoudreCmup, uniteesCompatibles, quantiteEnBase } from '../lib/coutRevient'
+import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import ImporterRecetteModal from '../components/ImporterRecetteModal'
-import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers, Upload } from 'lucide-react'
+import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers, Upload, RefreshCw } from 'lucide-react'
 
 const EMPTY_RECETTE = {
   famille: '', nom: '', atelier_id: '', qte_produit: 1, volume_prod: 1,
@@ -22,6 +23,8 @@ export default function Recettes() {
   const [selectedId, setSelectedId] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [rapprochementEnCours, setRapprochementEnCours] = useState(false)
+  const [rapprochementMessage, setRapprochementMessage] = useState('')
   const [form, setForm] = useState(EMPTY_RECETTE)
   const [query, setQuery] = useState('')
   const [newElementNom, setNewElementNom] = useState('')
@@ -184,11 +187,32 @@ export default function Recettes() {
     fetchAll()
   }
 
+  const nbEnAttente = ingredientsAll.filter((i) => !i.matiere_premiere_id && i.designation_brute).length
+
+  async function lancerRapprochement() {
+    setRapprochementEnCours(true)
+    setRapprochementMessage('')
+    try {
+      const { rapproches, total } = await reconcilierIngredientsEnAttente()
+      setRapprochementMessage(total === 0
+        ? 'Rien à rapprocher — aucun ingrédient en attente.'
+        : `${rapproches} ingrédient(s) sur ${total} rapproché(s) automatiquement.`)
+      fetchAll()
+    } finally {
+      setRapprochementEnCours(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Recettes</h2>
         <div className="flex items-center gap-2">
+          {nbEnAttente > 0 && (
+            <button onClick={lancerRapprochement} disabled={rapprochementEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-200 bg-orange-50 disabled:opacity-50">
+              <RefreshCw size={16} className={rapprochementEnCours ? 'animate-spin' : ''} /> {rapprochementEnCours ? 'Rapprochement...' : `${nbEnAttente} ingrédient(s) en attente`}
+            </button>
+          )}
           <button onClick={() => setShowImport(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200">
             <Upload size={16} /> Importer un fichier
           </button>
@@ -197,6 +221,7 @@ export default function Recettes() {
           </button>
         </div>
       </div>
+      {rapprochementMessage && <p className="text-xs text-gray-500 mb-4">{rapprochementMessage}</p>}
 
       {loading ? <p className="text-gray-400">Chargement...</p> : (
         <div className="grid grid-cols-12 gap-6">
@@ -415,6 +440,19 @@ function Field({ label, children }) {
 }
 
 function IngredientRow({ ing, onDelete }) {
+  if (!ing.matiere_premiere_id && ing.designation_brute) {
+    return (
+      <tr className="border-t border-gray-100 first:border-t-0 bg-orange-50/40">
+        <td className="px-4 py-2 text-gray-500 italic">{ing.designation_brute}</td>
+        <td className="px-2 py-2 text-right text-gray-400 w-24">{ing.quantite} {ing.unite}</td>
+        <td className="px-2 py-2 text-right w-28">
+          <span className="text-[10px] font-medium text-orange-500 bg-orange-100 px-1.5 py-0.5 rounded-full">en attente</span>
+        </td>
+        <td className="px-4 py-2 text-right text-gray-300 w-20">—</td>
+        <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
+      </tr>
+    )
+  }
   const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
   const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
   return (

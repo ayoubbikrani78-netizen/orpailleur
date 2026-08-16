@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Upload, FileText, Eye, X, Check, AlertCircle, Loader } from 'lucide-react'
 import { extractInvoiceData } from '../lib/ocr'
+import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
+import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 
 const STATUT_CONFIG = {
   en_cours: { label: 'En cours de traitement', color: 'bg-blue-50 text-blue-500', icon: Loader },
@@ -256,14 +258,7 @@ export default function Factures() {
 
       const prixUnitaire = parseFloat(ligne.prix_unitaire_ht) || 0
       const conditionnement = parseFloat(ligne.conditionnement) || 1
-      function getPrixBase(prix, conditionnement, unite) {
-          const u = (unite || '').toLowerCase().trim()
-          if (u === 'kg') return prix / (conditionnement * 1000)
-          if (u === 'l') return prix / (conditionnement * 1000)
-          if (u === 'g' || u === 'ml') return prix / conditionnement
-          return prix / conditionnement
-        }
-        const prixGUML = getPrixBase(prixUnitaire, conditionnement, ligne.unite)
+      const prixGUML = calculerPrixBase(prixUnitaire, conditionnement, ligne.unite)
 
       if (lienExistant) {
         // Une fois un article créé, on ne réécrit jamais silencieusement son conditionnement/unité
@@ -348,6 +343,12 @@ export default function Factures() {
         })
       }
     }
+    if (nouveaux.length > 0) {
+      // Un nouvel article Mercuriale peut correspondre à un ingrédient de recette
+      // laissé "en attente" (ex: recettes universelles pré-chargées) -> on retente
+      // le rapprochement automatiquement, sans bloquer la validation de la facture.
+      reconcilierIngredientsEnAttente().catch((e) => console.error('Rapprochement recettes en attente échoué :', e))
+    }
     return { echecs, nouveaux }
   }
 
@@ -412,6 +413,9 @@ export default function Factures() {
         // plutôt que d'écraser, pour ne pas perdre de marchandise et afficher une seule ligne.
         const quantiteAjoutee = Math.round((parseFloat(ligne.quantite) || 0) * (lien.conditionnement || 1) * 100) / 100
         const estNouveau = (nouveaux || []).includes(ligne.designation)
+        const prixUnitaireLigne = parseFloat(ligne.prix_unitaire_ht) || 0
+        const conditionnementLigne = parseFloat(ligne.conditionnement) || lien.conditionnement || 1
+        const prixGUML = calculerPrixBase(prixUnitaireLigne, conditionnementLigne, ligne.unite)
         if (parMatierePremiere.has(lien.matiere_premiere_id)) {
           const existant = parMatierePremiere.get(lien.matiere_premiere_id)
           existant.quantiteEnUnite = Math.round((existant.quantiteEnUnite + quantiteAjoutee) * 100) / 100
@@ -426,6 +430,7 @@ export default function Factures() {
             conditionnement: lien.conditionnement || 1,
             quantiteEnUnite: quantiteAjoutee,
             quantiteBrute: parseFloat(ligne.quantite) || 0,
+            prixGUML,
             estNouveau
           })
         }
@@ -470,8 +475,10 @@ export default function Factures() {
           matiere_premiere_id: item.matiere_premiere_id,
           type: 'reception',
           quantite: item.quantiteEnUnite,
+          prix_g_u_ml: item.prixGUML || null,
           raison: 'Facture sans commande associée'
         })
+        await recalculerCmup(item.matiere_premiere_id)
       }
       if (selected?.id) {
         await supabase.from('factures').update({ stock_applique: true }).eq('id', selected.id)

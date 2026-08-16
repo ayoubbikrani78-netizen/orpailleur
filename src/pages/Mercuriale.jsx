@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, ChevronRight, X, TrendingUp, TrendingDown } from 'lucide-react'
+import { rattraperCmupHistorique } from '../lib/cmup'
+import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
+import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
 
 const EMPTY_MP = {
   categorie_nom: '', designation_interne: '', unite: '', stock_mini: '',
@@ -23,6 +25,22 @@ export default function Mercuriale() {
   const [liens, setLiens] = useState([])
   const [mouvements, setMouvements] = useState([])
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
+  const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
+  const [rattrapageMessage, setRattrapageMessage] = useState('')
+
+  async function lancerRattrapageCmup() {
+    setRattrapageEnCours(true)
+    setRattrapageMessage('')
+    try {
+      const { corriges, matieres: nb } = await rattraperCmupHistorique()
+      setRattrapageMessage(corriges > 0
+        ? `${corriges} mouvement(s) complété(s), CMUP recalculé pour ${nb} matière(s) première(s).`
+        : 'Rien à rattraper — tous les mouvements ont déjà un prix enregistré.')
+      fetchAll()
+    } finally {
+      setRattrapageEnCours(false)
+    }
+  }
 
   useEffect(() => { fetchAll() }, [])
 
@@ -74,6 +92,7 @@ export default function Mercuriale() {
     })
     setShowForm(false)
     fetchAll()
+    reconcilierIngredientsEnAttente().catch((e) => console.error('Rapprochement recettes en attente échoué :', e))
   }
 
 async function deleteMatierePremiere() {
@@ -142,10 +161,16 @@ async function deleteMatierePremiere() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Mercuriale</h2>
-        <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-          <Plus size={16} /> Ajouter une matière première
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={lancerRattrapageCmup} disabled={rattrapageEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
+            <RefreshCw size={16} className={rattrapageEnCours ? 'animate-spin' : ''} /> {rattrapageEnCours ? 'Recalcul...' : 'Recalculer les CMUP'}
+          </button>
+          <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
+            <Plus size={16} /> Ajouter une matière première
+          </button>
+        </div>
       </div>
+      {rattrapageMessage && <p className="text-xs text-gray-500 mb-4">{rattrapageMessage}</p>}
 
       {loading ? <p className="text-gray-400">Chargement...</p> : (
         <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">

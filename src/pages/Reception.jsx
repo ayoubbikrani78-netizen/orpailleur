@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
 import { ChevronRight, X, AlertTriangle, Check, Upload, Loader } from 'lucide-react'
 import { extractInvoiceData, fileToBase64 } from '../lib/ocr'
 
@@ -55,7 +56,7 @@ export default function Reception() {
     setSelected(commande)
     const { data: l } = await supabase
       .from('commandes_lignes')
-      .select('*, matieres_premieres_fournisseurs(designation_fournisseur, reference_fournisseur, conditionnement, matiere_premiere_id, matieres_premieres(designation_interne, unite))')
+      .select('*, matieres_premieres_fournisseurs(designation_fournisseur, reference_fournisseur, conditionnement, unite, matiere_premiere_id, matieres_premieres(designation_interne, unite))')
       .eq('commande_id', commande.id)
     setLignes((l || []).map(ligne => ({ ...ligne, quantite_receptionnee: ligne.quantite_commandee })))
 
@@ -74,7 +75,7 @@ async function openDetail(commande) {
     setSelected(commande)
     const { data: l } = await supabase
       .from('commandes_lignes')
-      .select('*, matieres_premieres_fournisseurs(designation_fournisseur, reference_fournisseur, conditionnement, matiere_premiere_id, matieres_premieres(designation_interne, unite))')
+      .select('*, matieres_premieres_fournisseurs(designation_fournisseur, reference_fournisseur, conditionnement, unite, matiere_premiere_id, matieres_premieres(designation_interne, unite))')
       .eq('commande_id', commande.id)
     setLignes((l || []).map(ligne => ({ ...ligne, quantite_receptionnee: ligne.quantite_commandee })))
 
@@ -169,6 +170,9 @@ async function openDetail(commande) {
         const mpId = ligne.matieres_premieres_fournisseurs.matiere_premiere_id
         const conditionnement = ligne.matieres_premieres_fournisseurs.conditionnement || 1
         const quantiteEnUnite = (ligne.quantite_receptionnee || 0) * conditionnement
+        const prixUnitaireLigne = parseFloat(ligne.prix_unitaire_ht) || 0
+        const uniteAchat = ligne.matieres_premieres_fournisseurs.unite
+        const prixGUML = calculerPrixBase(prixUnitaireLigne, conditionnement, uniteAchat)
 
         const { data: mp } = await supabase.from('matieres_premieres').select('quantite_stock').eq('id', mpId).single()
         const nouveauStock = (mp?.quantite_stock || 0) + quantiteEnUnite
@@ -178,8 +182,10 @@ async function openDetail(commande) {
           matiere_premiere_id: mpId,
           type: 'reception',
           quantite: quantiteEnUnite,
+          prix_g_u_ml: prixGUML || null,
           raison: `Réception commande ${selected.fournisseurs?.nom}`
         })
+        await recalculerCmup(mpId)
       }
     }
 

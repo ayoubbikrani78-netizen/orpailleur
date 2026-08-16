@@ -42,12 +42,13 @@ export default function ImporterRecetteModal({ matieres, ateliers, onClose, onIm
     setLignes(lignes.filter((_, idx) => idx !== i))
   }
 
-  const lignesValides = lignes.filter((l) => l.matiere_premiere_id && l.quantite)
-  const lignesIncompletes = lignes.length - lignesValides.length
+  const lignesAvecQuantite = lignes.filter((l) => l.quantite)
+  const lignesValides = lignesAvecQuantite.filter((l) => l.matiere_premiere_id)
+  const lignesIncompletes = lignesAvecQuantite.length - lignesValides.length
 
   async function confirmer() {
     if (!form.nom || !form.famille) return setErreur('Nom et famille sont obligatoires.')
-    if (lignesValides.length === 0) return setErreur('Associe au moins un ingrédient à une matière première avant de valider.')
+    if (lignesAvecQuantite.length === 0) return setErreur('Ajoute au moins un ingrédient avec une quantité avant de valider.')
     setStep('saving')
     const { data: recette, error: errRecette } = await supabase.from('recettes').insert({
       nom: form.nom,
@@ -57,9 +58,10 @@ export default function ImporterRecetteModal({ matieres, ateliers, onClose, onIm
     if (errRecette) { setErreur(errRecette.message); setStep('review'); return }
 
     const { error: errIngredients } = await supabase.from('recette_ingredients').insert(
-      lignesValides.map((l) => ({
+      lignesAvecQuantite.map((l) => ({
         recette_id: recette.id,
-        matiere_premiere_id: l.matiere_premiere_id,
+        matiere_premiere_id: l.matiere_premiere_id || null,
+        designation_brute: l.matiere_premiere_id ? null : l.designationBrute,
         quantite: parseFloat(l.quantite),
         unite: l.unite,
       }))
@@ -126,7 +128,7 @@ export default function ImporterRecetteModal({ matieres, ateliers, onClose, onIm
                 <FileText size={14} className="text-gray-400" />
                 <p className="text-xs text-gray-500">
                   {lignes.length} ligne{lignes.length > 1 ? 's' : ''} détectée{lignes.length > 1 ? 's' : ''}
-                  {lignesIncompletes > 0 && <span className="text-orange-500"> — {lignesIncompletes} à compléter avant de valider</span>}
+                  {lignesIncompletes > 0 && <span className="text-orange-500"> — {lignesIncompletes} seront créées "en attente" (à rapprocher plus tard)</span>}
                 </p>
               </div>
 
@@ -173,7 +175,7 @@ export default function ImporterRecetteModal({ matieres, ateliers, onClose, onIm
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-gray-400 mt-2">Les lignes surlignées en orange n'ont pas de correspondance automatique — choisis la matière première toi-même, ou retire la ligne.</p>
+              <p className="text-xs text-gray-400 mt-2">Les lignes surlignées en orange n'ont pas de correspondance automatique — choisis la matière première toi-même, ou laisse "— à choisir —" : la ligne sera créée en attente et rapprochée automatiquement dès qu'un article correspondant apparaîtra dans la Mercuriale.</p>
             </div>
           )}
         </div>
@@ -188,7 +190,7 @@ export default function ImporterRecetteModal({ matieres, ateliers, onClose, onIm
               style={{ backgroundColor: '#C9A84C' }}
             >
               {step === 'saving' && <Loader2 size={14} className="animate-spin" />}
-              Créer la recette ({lignesValides.length} ingrédient{lignesValides.length > 1 ? 's' : ''})
+              Créer la recette ({lignesAvecQuantite.length} ingrédient{lignesAvecQuantite.length > 1 ? 's' : ''})
             </button>
           </div>
         )}
