@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { rattraperCmupHistorique } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
-import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
+import CategoryPicker from '../components/CategoryPicker'
+import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw, Search } from 'lucide-react'
 
 const EMPTY_MP = {
-  categorie_nom: '', designation_interne: '', unite: '', stock_mini: '',
+  univers: '', famille: '', designation_interne: '', unite: '', stock_mini: '',
   seuil_rouge: 3, seuil_orange: 7
 }
 
@@ -17,6 +18,7 @@ const EMPTY_FOURNISSEUR_LINK = {
 export default function Mercuriale() {
   const [matieres, setMatieres] = useState([])
   const [fournisseurs, setFournisseurs] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
@@ -27,6 +29,7 @@ export default function Mercuriale() {
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
+  const [query, setQuery] = useState('')
 
   async function lancerRattrapageCmup() {
     setRattrapageEnCours(true)
@@ -47,9 +50,21 @@ export default function Mercuriale() {
   async function fetchAll() {
     const { data: mp } = await supabase.from('matieres_premieres').select('*').order('designation_interne')
     const { data: f } = await supabase.from('fournisseurs').select('*').eq('etat', 'actif').order('nom')
+    const { data: cat } = await supabase.from('categories_mercuriale').select('*').order('univers').order('famille')
     setMatieres(mp || [])
     setFournisseurs(f || [])
+    setCategories(cat || [])
     setLoading(false)
+  }
+
+  /** Ajoute un nouveau couple Univers/Famille au référentiel s'il n'existe pas encore. */
+  async function assurerCategorie(univers, famille) {
+    if (!univers || !famille) return
+    const existe = categories.some((c) => c.univers === univers && c.famille === famille)
+    if (existe) return
+    await supabase.from('categories_mercuriale').insert({ univers, famille })
+    const { data: cat } = await supabase.from('categories_mercuriale').select('*').order('univers').order('famille')
+    setCategories(cat || [])
   }
 
   function getCouvertureColor(jours, seuilRouge, seuilOrange) {
@@ -83,9 +98,12 @@ export default function Mercuriale() {
 
   async function saveMatierePremiere() {
     if (!form.designation_interne) return alert('La désignation interne est obligatoire')
+    await assurerCategorie(form.univers, form.famille)
     await supabase.from('matieres_premieres').insert({
       designation_interne: form.designation_interne,
       unite: form.unite,
+      univers: form.univers || null,
+      famille: form.famille || null,
       stock_mini: form.stock_mini || 0,
       seuil_rouge: form.seuil_rouge,
       seuil_orange: form.seuil_orange
@@ -93,6 +111,13 @@ export default function Mercuriale() {
     setShowForm(false)
     fetchAll()
     reconcilierIngredientsEnAttente().catch((e) => console.error('Rapprochement recettes en attente échoué :', e))
+  }
+
+  async function updateCategorie(univers, famille) {
+    await assurerCategorie(univers, famille)
+    await supabase.from('matieres_premieres').update({ univers: univers || null, famille: famille || null }).eq('id', selected.id)
+    setSelected({ ...selected, univers, famille })
+    fetchAll()
   }
 
 async function deleteMatierePremiere() {
@@ -172,29 +197,58 @@ async function deleteMatierePremiere() {
       </div>
       {rattrapageMessage && <p className="text-xs text-gray-500 mb-4">{rattrapageMessage}</p>}
 
-      {loading ? <p className="text-gray-400">Chargement...</p> : (
-        <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100">
-          {matieres.length === 0 && <p className="p-6 text-gray-400 text-sm">Aucune matière première. Ajoutez-en une ou importez une facture.</p>}
-          {matieres.map(mp => {
-            const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
-            return (
-              <div key={mp.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(mp)}>
-                <div className="flex items-center gap-3">
-                  <span className={`w-2 h-2 rounded-full ${cov.dot}`} />
-                  <span className="font-medium text-gray-800">{mp.designation_interne}</span>
-                </div>
-                <div className="flex items-center gap-4">
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
-                    {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
-                  </span>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMP : {mp.cmp ? `${mp.cmp}€` : '—'}</span>
-                  <ChevronRight size={16} className="text-gray-400" />
+      <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 px-3 py-2 mb-4 max-w-sm">
+        <Search size={15} className="text-gray-400" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher un article..." className="flex-1 text-sm outline-none" />
+      </div>
+
+      {loading ? <p className="text-gray-400">Chargement...</p> : (() => {
+        const filtrees = matieres.filter((mp) => mp.designation_interne.toLowerCase().includes(query.toLowerCase()))
+        const parUnivers = filtrees.reduce((acc, mp) => {
+          const u = mp.univers || 'Non catégorisé'
+          const f = mp.famille || '—'
+          acc[u] ||= {}
+          acc[u][f] ||= []
+          acc[u][f].push(mp)
+          return acc
+        }, {})
+        const universTries = Object.keys(parUnivers).sort()
+        if (filtrees.length === 0) return <p className="text-gray-400 text-sm">Aucune matière première{query ? ' pour cette recherche' : ', ajoutez-en une ou importez une facture'}.</p>
+        return (
+          <div className="space-y-6">
+            {universTries.map((univers) => (
+              <div key={univers}>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 px-1">{univers}</h3>
+                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                  {Object.keys(parUnivers[univers]).sort().map((famille) => (
+                    <div key={famille}>
+                      <div className="px-6 py-2 text-xs font-semibold text-gray-400 bg-gray-50">{famille}</div>
+                      {parUnivers[univers][famille].map((mp) => {
+                        const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
+                        return (
+                          <div key={mp.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(mp)}>
+                            <div className="flex items-center gap-3">
+                              <span className={`w-2 h-2 rounded-full ${cov.dot}`} />
+                              <span className="font-medium text-gray-800">{mp.designation_interne}</span>
+                            </div>
+                            <div className="flex items-center gap-4">
+                              <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
+                                {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
+                              </span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMUP : {mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
+                              <ChevronRight size={16} className="text-gray-400" />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
-            )
-          })}
-        </div>
-      )}
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Formulaire création */}
       {showForm && (
@@ -205,6 +259,7 @@ async function deleteMatierePremiere() {
               <button onClick={() => setShowForm(false)}><X size={20} className="text-gray-400" /></button>
             </div>
             <div className="space-y-4">
+              <CategoryPicker categories={categories} univers={form.univers} famille={form.famille} onChange={(univers, famille) => setForm({ ...form, univers, famille })} />
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Désignation interne *</label>
                 <input className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-yellow-400" value={form.designation_interne} onChange={e => setForm({ ...form, designation_interne: e.target.value })} />
@@ -241,6 +296,7 @@ async function deleteMatierePremiere() {
         <MercurialeDetail
           mp={selected}
           fournisseurs={fournisseurs}
+          categories={categories}
           liens={liens}
           mouvements={mouvements}
           correctionStock={correctionStock}
@@ -248,6 +304,7 @@ async function deleteMatierePremiere() {
           onClose={() => setShowDetail(false)}
           onAddLink={(link) => addFournisseurLink(selected.id, link)}
           onSaveCorrection={saveCorrectionStock}
+          onUpdateCategorie={updateCategorie}
           onDelete={deleteMatierePremiere}
           getCouvertureColor={getCouvertureColor}
         />
@@ -256,20 +313,25 @@ async function deleteMatierePremiere() {
   )
 }
 
-function MercurialeDetail({ mp, fournisseurs, liens, mouvements, correctionStock, setCorrectionStock, onClose, onAddLink, onSaveCorrection, onDelete, getCouvertureColor }) {
+
+function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, correctionStock, setCorrectionStock, onClose, onAddLink, onSaveCorrection, onUpdateCategorie, onDelete, getCouvertureColor }) {
   const [newLink, setNewLink] = useState(EMPTY_FOURNISSEUR_LINK)
   const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-8">
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-4">
   <h3 className="text-lg font-bold text-gray-800">{mp.designation_interne}</h3>
   <div className="flex items-center gap-3">
     <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-700 font-medium">Supprimer</button>
     <button onClick={onClose}><X size={20} className="text-gray-400" /></button>
   </div>
 </div>
+
+        <div className="mb-6 max-w-md">
+          <CategoryPicker categories={categories} univers={mp.univers} famille={mp.famille} onChange={onUpdateCategorie} />
+        </div>
 
         {/* Indicateurs clés */}
         <div className="grid grid-cols-4 gap-3 mb-6">
@@ -282,8 +344,8 @@ function MercurialeDetail({ mp, fournisseurs, liens, mouvements, correctionStock
             <p className="text-lg font-bold">{mp.quantite_stock || 0} {mp.unite}</p>
           </div>
           <div className="rounded-lg p-3 bg-red-50 text-red-600">
-            <p className="text-xs opacity-70">CMP</p>
-            <p className="text-lg font-bold">{mp.cmp ? `${mp.cmp}€` : '—'}</p>
+            <p className="text-xs opacity-70">CMUP</p>
+            <p className="text-lg font-bold">{mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</p>
           </div>
           <div className="rounded-lg p-3 bg-gray-50 text-gray-600">
             <p className="text-xs opacity-70">Valeur stock</p>

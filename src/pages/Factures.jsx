@@ -4,6 +4,7 @@ import { Upload, FileText, Eye, X, Check, AlertCircle, Loader } from 'lucide-rea
 import { extractInvoiceData } from '../lib/ocr'
 import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
+import { CategoryPickerCompact } from '../components/CategoryPicker'
 
 const STATUT_CONFIG = {
   en_cours: { label: 'En cours de traitement', color: 'bg-blue-50 text-blue-500', icon: Loader },
@@ -13,6 +14,7 @@ const STATUT_CONFIG = {
 
 export default function Factures() {
   const [factures, setFactures] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -29,7 +31,20 @@ export default function Factures() {
   const [uploadProgress, setUploadProgress] = useState(null)
   const [confirmationDoublon, setConfirmationDoublon] = useState(null)
 
-  useEffect(() => { fetchFactures() }, [])
+  useEffect(() => { fetchFactures(); fetchCategories() }, [])
+
+  async function fetchCategories() {
+    const { data } = await supabase.from('categories_mercuriale').select('*').order('univers').order('famille')
+    setCategories(data || [])
+  }
+
+  async function assurerCategorie(univers, famille) {
+    if (!univers || !famille) return
+    const existe = categories.some((c) => c.univers === univers && c.famille === famille)
+    if (existe) return
+    await supabase.from('categories_mercuriale').insert({ univers, famille })
+    fetchCategories()
+  }
 
   async function fetchFactures() {
     const { data } = await supabase
@@ -431,6 +446,8 @@ export default function Factures() {
             quantiteEnUnite: quantiteAjoutee,
             quantiteBrute: parseFloat(ligne.quantite) || 0,
             prixGUML,
+            univers: ligne.univers || '',
+            famille: ligne.famille || '',
             estNouveau
           })
         }
@@ -451,6 +468,13 @@ export default function Factures() {
     setIsUpdatingStock(true)
     try {
       for (const item of stockAMettreAJour) {
+        if (item.estNouveau && (item.univers || item.famille)) {
+          await assurerCategorie(item.univers, item.famille)
+          await supabase.from('matieres_premieres').update({
+            univers: item.univers || null,
+            famille: item.famille || null
+          }).eq('id', item.matiere_premiere_id)
+        }
         // Si la quantité ou l'unité ont été corrigées manuellement (nouveau produit ou déjà connu),
         // on réécrit conditionnement/unité dans le catalogue : la correction faite maintenant, une
         // seule fois, doit rester valable pour toutes les prochaines factures de ce même produit.
@@ -677,10 +701,18 @@ async function deleteFacture() {
             {(() => {
               const nouveaux = stockAMettreAJour.filter(i => i.estNouveau)
               const connus = stockAMettreAJour.filter(i => !i.estNouveau)
-              const renderLigne = (item, i, listeSource) => (
-                <div key={item.matiere_premiere_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
-                  <span className="font-medium text-gray-700">{item.designation}</span>
+              const renderLigne = (item, i, listeSource, isNouveau) => (
+                <div key={item.matiere_premiere_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm gap-2">
+                  <span className="font-medium text-gray-700 flex-1">{item.designation}</span>
                   <div className="flex items-center gap-2">
+                    {isNouveau && (
+                      <CategoryPickerCompact
+                        categories={categories}
+                        univers={item.univers}
+                        famille={item.famille}
+                        onChange={(univers, famille) => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, univers, famille } : s))}
+                      />
+                    )}
                     <input
                       type="number"
                       className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
@@ -715,7 +747,7 @@ async function deleteFacture() {
                         <span>{nouveaux.length} nouveau(x) produit(s) — vérifie la quantité une fois, elle restera la référence pour toutes les prochaines factures de ce produit</span>
                       </div>
                       <div className="space-y-2">
-                        {nouveaux.map((item, i) => renderLigne(item, i, nouveaux))}
+                        {nouveaux.map((item, i) => renderLigne(item, i, nouveaux, true))}
                       </div>
                     </div>
                   )}
@@ -725,7 +757,7 @@ async function deleteFacture() {
                         {connus.length} produit(s) déjà connu(s) — appliqué(s) automatiquement (cliquer pour vérifier)
                       </summary>
                       <div className="space-y-2 mt-2">
-                        {connus.map((item, i) => renderLigne(item, i, connus))}
+                        {connus.map((item, i) => renderLigne(item, i, connus, false))}
                       </div>
                     </details>
                   )}
