@@ -58,9 +58,11 @@ const INVOICE_SCHEMA = {
               conditionnement_colonne_brute: { type: 'string' },
               prix_unitaire_brut: { type: 'string' },
               montant_brut: { type: 'string' },
-              poids_volume_par_unite: { type: 'string' }
+              poids_volume_par_unite: { type: 'string' },
+              univers_suggere: { type: 'string' },
+              famille_suggere: { type: 'string' }
             },
-            required: ['designation', 'quantite_brute', 'conditionnement_colonne_brute', 'prix_unitaire_brut', 'montant_brut', 'poids_volume_par_unite']
+            required: ['designation', 'quantite_brute', 'conditionnement_colonne_brute', 'prix_unitaire_brut', 'montant_brut', 'poids_volume_par_unite', 'univers_suggere', 'famille_suggere']
           }
         }
       },
@@ -113,7 +115,21 @@ RÈGLE SUR LES PRODUITS DE VIENNOISERIE/BOULANGERIE PRÊTS À VENDRE (motif "poi
 Ne confonds pas avec un ingrédient brut destiné à être transformé (farine, jambon en tranches, fromage...), qui reste suivi au poids comme les autres exemples ci-dessus.
 - Comptage d'unités non pesables (ex: "20u x 5" = 100 unités, "Paquet 125 sachets", "EN 1000 FEUILLES") : donne le total en pièces ("100piece", "125piece", "1000piece").
 - Code de format de boîte de conserve professionnel type "3/1", "5/1" (le chiffre avant "/1" ≈ poids net en kg, convention du métier) : "3/1" -> "3kg". Un format "4/4" ou similaire n'est PAS cette convention : s'il n'y a aucune autre indication de poids, réponds "1piece".
-- Attention aux nombres qui décrivent une CONTENANCE d'un contenant plutôt qu'une quantité de produit achetée : ex. "SACS POUBELLES 130L" (sacs conçus pour contenir 130 litres de déchets, pas 130L de produit), "BAC RECT 20L 53X40 H14CM" (un bac de rangement d'une contenance de 20L — tu achètes des bacs vides, pas 20L de quelque chose), "SEAU 5L" quand c'est le nom d'un contenant vide vendu comme ustensile. Dans ces cas, ignore ce nombre et réponds "1piece" par bac/contenant acheté (ou le comptage d'unités s'il y en a un, ex: "20u x 5" -> "100piece"). Ne confonds jamais la contenance d'un contenant avec le poids/volume d'un produit alimentaire conditionné dedans (ex: "OEUF ENTIER LIQUIDE BIB 5L" est bien 5L de produit, car c'est un aliment liquide vendu par le volume — la distinction se fait sur si le nom désigne un ustensile/contenant vide ou un aliment).`
+- Attention aux nombres qui décrivent une CONTENANCE d'un contenant plutôt qu'une quantité de produit achetée : ex. "SACS POUBELLES 130L" (sacs conçus pour contenir 130 litres de déchets, pas 130L de produit), "BAC RECT 20L 53X40 H14CM" (un bac de rangement d'une contenance de 20L — tu achètes des bacs vides, pas 20L de quelque chose), "SEAU 5L" quand c'est le nom d'un contenant vide vendu comme ustensile. Dans ces cas, ignore ce nombre et réponds "1piece" par bac/contenant acheté (ou le comptage d'unités s'il y en a un, ex: "20u x 5" -> "100piece"). Ne confonds jamais la contenance d'un contenant avec le poids/volume d'un produit alimentaire conditionné dedans (ex: "OEUF ENTIER LIQUIDE BIB 5L" est bien 5L de produit, car c'est un aliment liquide vendu par le volume — la distinction se fait sur si le nom désigne un ustensile/contenant vide ou un aliment).
+
+=== CATÉGORISATION (univers_suggere / famille_suggere) ===
+Propose une catégorie pour chaque ligne produit, en te basant UNIQUEMENT sur son nom — c'est une suggestion que le boulanger pourra corriger, pas un calcul, donc reste dans la liste ci-dessous et n'invente pas de nouvelle catégorie. Si tu hésites vraiment entre plusieurs familles, choisis la plus probable plutôt que de laisser vide ; ne laisse vide ("") que si le produit ne correspond à aucun univers de la liste.
+
+Univers disponibles et leurs familles :
+- BOISSON : CAFE, EAU, EAU AROMATISE, EAU GAZEUSE, JUS, JUS PRESSE, SIROP, SODA, THE, THE FRAIS
+- BOULANGERIE : EAU ROBINET, HYGIÈNE & ENTRETIEN, ÉPICERIE
+- FOURNITURE ALIMENTAIRE : ÉPICERIE
+- PAIN : MEUNERIE
+- PÂTISSERIE : CRÈMERIE, FRUITS FRAIS, LÉGUMES FRAIS, MEUNERIE, RECYCLING, SURGELE, ÉPICERIE
+- SNACKING : CHARCUTERIE, CRÈMERIE, EPICERIE, FRAIS, LÉGUMES FRAIS, SURGELE, ÉPICERIE
+- VIENNOISERIE : CRÈMERIE, MEUNERIE, SURGELE, ÉPICERIE
+
+Exemples : "COCA COLA UE 33CLx24" -> univers_suggere="BOISSON", famille_suggere="SODA". "BEURRE DOUX AOP CHARENTES" -> univers_suggere="PÂTISSERIE", famille_suggere="CRÈMERIE" (ingrédient de recette) ou "SNACKING"/"CRÈMERIE" si le contexte de la facture est clairement snacking — choisis PÂTISSERIE par défaut pour un ingrédient générique. "FARINE T55 TRADITION" -> univers_suggere="PAIN", famille_suggere="MEUNERIE". "CROISSANT SECRETS 75gx144" -> univers_suggere="VIENNOISERIE", famille_suggere="ÉPICERIE". "SAUMON FUME TRANCHE" -> univers_suggere="SNACKING", famille_suggere="CHARCUTERIE". "SALADE ICEBERG" -> univers_suggere="SNACKING", famille_suggere="LÉGUMES FRAIS".`
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -329,7 +345,9 @@ export function finaliserLigne(ligneBrute) {
     conditionnement: poidsVolume.valeur,
     unite: poidsVolume.unite,
     prix_unitaire_ht: prixUnitaire,
-    montant_ht: montant
+    montant_ht: montant,
+    univers_suggere: ligneBrute.univers_suggere || '',
+    famille_suggere: ligneBrute.famille_suggere || ''
   }
 }
 

@@ -446,8 +446,8 @@ export default function Factures() {
             quantiteEnUnite: quantiteAjoutee,
             quantiteBrute: parseFloat(ligne.quantite) || 0,
             prixGUML,
-            univers: ligne.univers || '',
-            famille: ligne.famille || '',
+            univers: categories.some((c) => c.univers === ligne.univers_suggere) ? ligne.univers_suggere : '',
+            famille: categories.some((c) => c.univers === ligne.univers_suggere && c.famille === ligne.famille_suggere) ? ligne.famille_suggere : '',
             estNouveau
           })
         }
@@ -681,7 +681,7 @@ async function deleteFacture() {
       {showStockUpdate && (
         <div className="fixed inset-0 bg-black/40 z-50 overflow-y-auto">
           <div className="min-h-full flex items-start justify-center py-8 px-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-8">
             <h3 className="text-lg font-bold text-gray-800 mb-2">Mettre à jour le stock ?</h3>
             <p className="text-sm text-gray-500 mb-3">Cette facture ne correspond à aucune commande passée dans Orpailleur. Voulez-vous ajouter ces quantités au stock de la mercuriale ?</p>
             <div className="flex items-center gap-2 text-xs font-medium text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-4">
@@ -702,9 +702,18 @@ async function deleteFacture() {
               const nouveaux = stockAMettreAJour.filter(i => i.estNouveau)
               const connus = stockAMettreAJour.filter(i => !i.estNouveau)
               const renderLigne = (item, i, listeSource, isNouveau) => (
-                <div key={item.matiere_premiere_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm gap-2">
-                  <span className="font-medium text-gray-700 flex-1">{item.designation}</span>
-                  <div className="flex items-center gap-2">
+                <div key={item.matiere_premiere_id} className="p-3 bg-gray-50 rounded-lg text-sm">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="font-medium text-gray-700">{item.designation}</span>
+                    <button
+                      onClick={() => setStockAMettreAJour(stockAMettreAJour.filter(s => s.matiere_premiere_id !== item.matiere_premiere_id))}
+                      title="Retirer cette ligne (comptée en trop ou en double)"
+                      className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded cursor-pointer shrink-0"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
                     {isNouveau && (
                       <CategoryPickerCompact
                         categories={categories}
@@ -713,28 +722,23 @@ async function deleteFacture() {
                         onChange={(univers, famille) => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, univers, famille } : s))}
                       />
                     )}
-                    <input
-                      type="number"
-                      className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
-                      value={item.quantiteEnUnite}
-                      onChange={e => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, quantiteEnUnite: parseFloat(e.target.value) || 0 } : s))}
-                    />
-                    <select
-                      className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-gray-600 bg-white cursor-pointer"
-                      value={item.unite}
-                      onChange={e => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, unite: e.target.value } : s))}
-                    >
-                      <option value="kg">kg</option>
-                      <option value="L">L</option>
-                      <option value="piece">piece</option>
-                    </select>
-                    <button
-                      onClick={() => setStockAMettreAJour(stockAMettreAJour.filter(s => s.matiere_premiere_id !== item.matiere_premiere_id))}
-                      title="Retirer cette ligne (comptée en trop ou en double)"
-                      className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded cursor-pointer"
-                    >
-                      <X size={14} />
-                    </button>
+                    <div className="flex items-center gap-2 ml-auto">
+                      <input
+                        type="number"
+                        className="w-20 border border-gray-200 rounded-lg px-2 py-1 text-sm text-right"
+                        value={item.quantiteEnUnite}
+                        onChange={e => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, quantiteEnUnite: parseFloat(e.target.value) || 0 } : s))}
+                      />
+                      <select
+                        className="border border-gray-200 rounded-lg px-1.5 py-1 text-xs text-gray-600 bg-white cursor-pointer"
+                        value={item.unite}
+                        onChange={e => setStockAMettreAJour(stockAMettreAJour.map(s => s.matiere_premiere_id === item.matiere_premiere_id ? { ...s, unite: e.target.value } : s))}
+                      >
+                        <option value="kg">kg</option>
+                        <option value="L">L</option>
+                        <option value="piece">piece</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               )
