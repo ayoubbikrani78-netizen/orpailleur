@@ -27,6 +27,7 @@ export default function Recettes() {
   const [rapprochementMessage, setRapprochementMessage] = useState('')
   const [form, setForm] = useState(EMPTY_RECETTE)
   const [query, setQuery] = useState('')
+  const [familleActive, setFamilleActive] = useState('Toutes')
   const [newElementNom, setNewElementNom] = useState('')
   const [showElements, setShowElements] = useState(false)
   const [newIngredientByElement, setNewIngredientByElement] = useState({})
@@ -104,11 +105,15 @@ export default function Recettes() {
       })
     : null
 
-  const filtered = recettes.filter((r) => r.nom.toLowerCase().includes(query.toLowerCase()))
-  const parFamille = filtered.reduce((acc, r) => {
-    (acc[r.famille] ||= []).push(r)
-    return acc
-  }, {})
+  const familles = useMemo(() => {
+    const compte = {}
+    for (const r of recettes) compte[r.famille] = (compte[r.famille] || 0) + 1
+    return Object.entries(compte).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [recettes])
+
+  const filtered = recettes
+    .filter((r) => r.nom.toLowerCase().includes(query.toLowerCase()))
+    .filter((r) => familleActive === 'Toutes' || r.famille === familleActive)
 
   // ---- Actions ----
   async function createRecette() {
@@ -223,6 +228,34 @@ export default function Recettes() {
       </div>
       {rapprochementMessage && <p className="text-xs text-gray-500 mb-4">{rapprochementMessage}</p>}
 
+      <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 w-fit overflow-x-auto max-w-full">
+        <button
+          onClick={() => setFamilleActive('Toutes')}
+          className="px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors"
+          style={{
+            backgroundColor: familleActive === 'Toutes' ? '#FFFFFF' : 'transparent',
+            color: familleActive === 'Toutes' ? '#1F2937' : '#6B7280',
+            boxShadow: familleActive === 'Toutes' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+          }}
+        >
+          Toutes <span className="text-xs text-gray-400 ml-1">{recettes.length}</span>
+        </button>
+        {familles.map(([famille, nb]) => (
+          <button
+            key={famille}
+            onClick={() => setFamilleActive(famille)}
+            className="px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors"
+            style={{
+              backgroundColor: familleActive === famille ? '#FFFFFF' : 'transparent',
+              color: familleActive === famille ? '#1F2937' : '#6B7280',
+              boxShadow: familleActive === famille ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+            }}
+          >
+            {famille} <span className="text-xs text-gray-400 ml-1">{nb}</span>
+          </button>
+        ))}
+      </div>
+
       {loading ? <p className="text-gray-400">Chargement...</p> : (
         <div className="grid grid-cols-12 gap-6">
           {/* Liste */}
@@ -232,17 +265,12 @@ export default function Recettes() {
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher..." className="flex-1 text-sm outline-none" />
             </div>
             <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
-              {Object.keys(parFamille).length === 0 && <p className="p-6 text-gray-400 text-sm">Aucune recette pour l'instant.</p>}
-              {Object.entries(parFamille).map(([famille, list]) => (
-                <div key={famille}>
-                  <div className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wide bg-gray-50">{famille}</div>
-                  {list.map((r) => (
-                    <button key={r.id} onClick={() => setSelectedId(r.id)} className={`w-full text-left px-4 py-3 flex items-center justify-between hover:bg-gray-50 ${selectedId === r.id ? 'bg-yellow-50' : ''}`}>
-                      <span className="text-sm font-medium text-gray-700">{r.nom}{r.est_composant && <span className="ml-2 text-[10px] text-gray-400">(composant)</span>}</span>
-                      <ChevronRight size={16} className="text-gray-300" />
-                    </button>
-                  ))}
-                </div>
+              {filtered.length === 0 && <p className="p-6 text-gray-400 text-sm">Aucune recette pour cette famille.</p>}
+              {filtered.map((r) => (
+                <button key={r.id} onClick={() => setSelectedId(r.id)} className={`w-full text-left px-4 py-3 flex items-center justify-between hover:bg-gray-50 ${selectedId === r.id ? 'bg-yellow-50' : ''}`}>
+                  <span className="text-sm font-medium text-gray-700">{r.nom}{r.est_composant && <span className="ml-2 text-[10px] text-gray-400">(composant)</span>}</span>
+                  <ChevronRight size={16} className="text-gray-300" />
+                </button>
               ))}
             </div>
           </div>
