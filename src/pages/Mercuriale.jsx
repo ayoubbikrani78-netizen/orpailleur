@@ -30,6 +30,8 @@ export default function Mercuriale() {
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
   const [query, setQuery] = useState('')
+  const [universActif, setUniversActif] = useState('Tous')
+  const [familleActive, setFamilleActive] = useState('Toutes')
 
   async function lancerRattrapageCmup() {
     setRattrapageEnCours(true)
@@ -203,50 +205,66 @@ async function deleteMatierePremiere() {
       </div>
 
       {loading ? <p className="text-gray-400">Chargement...</p> : (() => {
-        const filtrees = matieres.filter((mp) => mp.designation_interne.toLowerCase().includes(query.toLowerCase()))
-        const parUnivers = filtrees.reduce((acc, mp) => {
-          const u = mp.univers || 'Non catégorisé'
-          const f = mp.famille || '—'
-          acc[u] ||= {}
-          acc[u][f] ||= []
-          acc[u][f].push(mp)
-          return acc
-        }, {})
-        const universTries = Object.keys(parUnivers).sort()
-        if (filtrees.length === 0) return <p className="text-gray-400 text-sm">Aucune matière première{query ? ' pour cette recherche' : ', ajoutez-en une ou importez une facture'}.</p>
+        const universDisponibles = [...new Set(matieres.map((mp) => mp.univers || 'Non catégorisé'))].sort()
+        const famillesDisponibles = universActif === 'Tous'
+          ? []
+          : [...new Set(matieres.filter((mp) => (mp.univers || 'Non catégorisé') === universActif).map((mp) => mp.famille || '—'))].sort()
+
+        const filtrees = matieres
+          .filter((mp) => mp.designation_interne.toLowerCase().includes(query.toLowerCase()))
+          .filter((mp) => universActif === 'Tous' || (mp.univers || 'Non catégorisé') === universActif)
+          .filter((mp) => familleActive === 'Toutes' || (mp.famille || '—') === familleActive)
+
         return (
-          <div className="space-y-6">
-            {universTries.map((univers) => (
-              <div key={univers}>
-                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2 px-1">{univers}</h3>
-                <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
-                  {Object.keys(parUnivers[univers]).sort().map((famille) => (
-                    <div key={famille}>
-                      <div className="px-6 py-2 text-xs font-semibold text-gray-400 bg-gray-50">{famille}</div>
-                      {parUnivers[univers][famille].map((mp) => {
-                        const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
-                        return (
-                          <div key={mp.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(mp)}>
-                            <div className="flex items-center gap-3">
-                              <span className={`w-2 h-2 rounded-full ${cov.dot}`} />
-                              <span className="font-medium text-gray-800">{mp.designation_interne}</span>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
-                                {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
-                              </span>
-                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMUP : {mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
-                              <ChevronRight size={16} className="text-gray-400" />
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  ))}
-                </div>
+          <>
+            <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-3 w-fit overflow-x-auto max-w-full">
+              <TabButton active={universActif === 'Tous'} onClick={() => { setUniversActif('Tous'); setFamilleActive('Toutes') }}>
+                Tous <span className="text-xs text-gray-400 ml-1">{matieres.length}</span>
+              </TabButton>
+              {universDisponibles.map((u) => (
+                <TabButton key={u} active={universActif === u} onClick={() => { setUniversActif(u); setFamilleActive('Toutes') }}>
+                  {u} <span className="text-xs text-gray-400 ml-1">{matieres.filter((mp) => (mp.univers || 'Non catégorisé') === u).length}</span>
+                </TabButton>
+              ))}
+            </div>
+
+            {universActif !== 'Tous' && famillesDisponibles.length > 0 && (
+              <div className="flex gap-1 p-1 rounded-lg bg-gray-50 border border-gray-100 mb-4 w-fit overflow-x-auto max-w-full">
+                <TabButton small active={familleActive === 'Toutes'} onClick={() => setFamilleActive('Toutes')}>Toutes</TabButton>
+                {famillesDisponibles.map((f) => (
+                  <TabButton small key={f} active={familleActive === f} onClick={() => setFamilleActive(f)}>{f}</TabButton>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+
+            {filtrees.length === 0 ? (
+              <p className="text-gray-400 text-sm">Aucune matière première{query ? ' pour cette recherche' : ', ajoutez-en une ou importez une facture'}.</p>
+            ) : (
+              <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+                {filtrees.map((mp) => {
+                  const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
+                  return (
+                    <div key={mp.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50 cursor-pointer" onClick={() => openDetail(mp)}>
+                      <div className="flex items-center gap-3">
+                        <span className={`w-2 h-2 rounded-full ${cov.dot}`} />
+                        <span className="font-medium text-gray-800">{mp.designation_interne}</span>
+                        {universActif === 'Tous' && (
+                          <span className="text-[10px] text-gray-400">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
+                          {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
+                        </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMUP : {mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
+                        <ChevronRight size={16} className="text-gray-400" />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
         )
       })()}
 
@@ -432,5 +450,21 @@ function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, cor
         </div>
       </div>
     </div>
+  )
+}
+
+function TabButton({ active, onClick, small, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-md font-medium whitespace-nowrap transition-colors ${small ? 'px-3 py-1.5 text-xs' : 'px-4 py-2 text-sm'}`}
+      style={{
+        backgroundColor: active ? '#FFFFFF' : 'transparent',
+        color: active ? '#1F2937' : '#6B7280',
+        boxShadow: active ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+      }}
+    >
+      {children}
+    </button>
   )
 }
