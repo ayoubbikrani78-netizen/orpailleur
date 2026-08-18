@@ -192,6 +192,11 @@ export default function Recettes() {
     fetchAll()
   }
 
+  async function resoudreIngredientEnAttente(ingredientId, matierePremiereId) {
+    await supabase.from('recette_ingredients').update({ matiere_premiere_id: matierePremiereId, designation_brute: null }).eq('id', ingredientId)
+    fetchAll()
+  }
+
   const nbEnAttente = ingredientsAll.filter((i) => !i.matiere_premiere_id && i.designation_brute).length
 
   async function lancerRapprochement() {
@@ -336,7 +341,7 @@ export default function Recettes() {
                   <table className="w-full text-sm">
                     <tbody>
                       {selectedIngredientsDirects.map((ing) => (
-                        <IngredientRow key={ing.id} ing={ing} onDelete={() => deleteIngredient(ing.id)} />
+                        <IngredientRow key={ing.id} ing={ing} matieres={matieres} onDelete={() => deleteIngredient(ing.id)} onResoudre={resoudreIngredientEnAttente} />
                       ))}
                       {selectedIngredientsDirects.length === 0 && (
                         <tr><td colSpan={5} className="px-4 py-3 text-gray-400 text-xs">Aucun ingrédient direct pour l'instant.</td></tr>
@@ -366,7 +371,7 @@ export default function Recettes() {
                           <table className="w-full text-sm">
                             <tbody>
                               {el.ingredients.map((ing) => (
-                                <IngredientRow key={ing.id} ing={ing} onDelete={() => deleteIngredient(ing.id)} />
+                                <IngredientRow key={ing.id} ing={ing} matieres={matieres} onDelete={() => deleteIngredient(ing.id)} onResoudre={resoudreIngredientEnAttente} />
                               ))}
                             </tbody>
                           </table>
@@ -467,16 +472,22 @@ function Field({ label, children }) {
   )
 }
 
-function IngredientRow({ ing, onDelete }) {
+function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
   if (!ing.matiere_premiere_id && ing.designation_brute) {
     return (
       <tr className="border-t border-gray-100 first:border-t-0 bg-orange-50/40">
         <td className="px-4 py-2 text-gray-500 italic">{ing.designation_brute}</td>
         <td className="px-2 py-2 text-right text-gray-400 w-24">{ing.quantite} {ing.unite}</td>
-        <td className="px-2 py-2 text-right w-28">
-          <span className="text-[10px] font-medium text-orange-500 bg-orange-100 px-1.5 py-0.5 rounded-full">en attente</span>
+        <td className="px-2 py-2 text-right w-48" colSpan={2}>
+          <select
+            className="w-full border border-orange-300 bg-orange-50 rounded-lg px-2 py-1 text-xs text-gray-700"
+            value=""
+            onChange={(e) => e.target.value && onResoudre(ing.id, e.target.value)}
+          >
+            <option value="">— associer à un article —</option>
+            {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
+          </select>
         </td>
-        <td className="px-4 py-2 text-right text-gray-300 w-20">—</td>
         <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
       </tr>
     )

@@ -180,6 +180,7 @@ export async function extraireRecetteDeFichier(file) {
 function normaliserTexte(s) {
   return (s || '')
     .toLowerCase()
+    .replace(/œ/g, 'oe').replace(/æ/g, 'ae') // ligatures non décomposées par NFD (Œuf, Bœuf...)
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9 ]/g, ' ')
     .split(/\s+/)
