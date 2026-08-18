@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase'
 import { calculerCoutRevient, resoudreCmup, uniteesCompatibles, quantiteEnBase } from '../lib/coutRevient'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import ImporterRecetteModal from '../components/ImporterRecetteModal'
+import RapprochementMasseModal from '../components/RapprochementMasseModal'
 import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers, Upload, RefreshCw } from 'lucide-react'
 
 const EMPTY_RECETTE = {
@@ -23,6 +24,7 @@ export default function Recettes() {
   const [selectedId, setSelectedId] = useState(null)
   const [showForm, setShowForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [showRapprochementMasse, setShowRapprochementMasse] = useState(false)
   const [rapprochementEnCours, setRapprochementEnCours] = useState(false)
   const [rapprochementMessage, setRapprochementMessage] = useState('')
   const [form, setForm] = useState(EMPTY_RECETTE)
@@ -42,7 +44,7 @@ export default function Recettes() {
       await Promise.all([
         supabase.from('recettes').select('*').order('famille').order('nom'),
         supabase.from('ateliers').select('*').order('nom'),
-        supabase.from('matieres_premieres').select('id, designation_interne, unite, cmp').order('designation_interne'),
+        supabase.from('matieres_premieres').select('id, designation_interne, unite, cmp, poids_moyen_g').order('designation_interne'),
         supabase.from('bareme_energie').select('*'),
         supabase.from('reglages').select('perte_defaut').limit(1).maybeSingle(),
         supabase.from('recette_elements').select('*').order('ordre'),
@@ -204,10 +206,9 @@ export default function Recettes() {
     setRapprochementMessage('')
     try {
       const { rapproches, total } = await reconcilierIngredientsEnAttente()
-      setRapprochementMessage(total === 0
-        ? 'Rien à rapprocher — aucun ingrédient en attente.'
-        : `${rapproches} ingrédient(s) sur ${total} rapproché(s) automatiquement.`)
-      fetchAll()
+      setRapprochementMessage(rapproches > 0 ? `${rapproches} ingrédient(s) rapprochés automatiquement (sans ambiguïté).` : '')
+      await fetchAll()
+      if (total - rapproches > 0) setShowRapprochementMasse(true)
     } finally {
       setRapprochementEnCours(false)
     }
@@ -358,7 +359,7 @@ export default function Recettes() {
                 {selectedElements.length > 0 && (
                   <div className="space-y-4 mb-4">
                     {selectedElements.map((el) => {
-                      const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp?.unite) * i.cmup, 0)
+                      const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp) * i.cmup, 0)
                       return (
                         <div key={el.id} className="border border-gray-200 rounded-lg">
                           <div className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-t-lg">
@@ -459,6 +460,13 @@ export default function Recettes() {
           }}
         />
       )}
+
+      {showRapprochementMasse && (
+        <RapprochementMasseModal
+          onClose={() => setShowRapprochementMasse(false)}
+          onDone={fetchAll}
+        />
+      )}
     </div>
   )
 }
@@ -492,7 +500,7 @@ function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
       </tr>
     )
   }
-  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
+  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp)
   const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
   return (
     <tr className="border-t border-gray-100 first:border-t-0">
@@ -511,7 +519,7 @@ function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
 // Ligne de saisie réutilisée pour les ingrédients directs ET ceux d'un élément
 function IngredientPicker({ matieres, ctx, draft, setDraft, onAdd }) {
   const mpSelectionnee = draft.matiere_premiere_id ? ctx.matieresById[draft.matiere_premiere_id] : null
-  const options = mpSelectionnee ? uniteesCompatibles(mpSelectionnee.unite) : []
+  const options = mpSelectionnee ? uniteesCompatibles(mpSelectionnee) : []
   return (
     <div className="flex items-center gap-2 px-4 py-2 border-t border-gray-100">
       <select
@@ -519,7 +527,7 @@ function IngredientPicker({ matieres, ctx, draft, setDraft, onAdd }) {
         value={draft.matiere_premiere_id}
         onChange={(e) => {
           const mp = ctx.matieresById[e.target.value]
-          setDraft({ ...draft, matiere_premiere_id: e.target.value, unite: uniteesCompatibles(mp?.unite)[0] })
+          setDraft({ ...draft, matiere_premiere_id: e.target.value, unite: uniteesCompatibles(mp)[0] })
         }}
       >
         <option value="">Ajouter un ingrédient (Mercuriale)...</option>

@@ -222,6 +222,66 @@ export function suggererMatierePremiere(designation, matieres, seuil = 0.6, marg
 }
 
 /**
+ * Retourne les N matières premières les plus proches d'une désignation,
+ * classées par score de chevauchement — sans logique d'ambiguïté cette fois
+ * (utilisé pour proposer des suggestions rapides à l'utilisateur, qui choisit).
+ */
+export function suggererCandidats(designation, matieres, n = 4) {
+  const mots = new Set(normaliserTexte(designation))
+  if (mots.size === 0) return []
+  return matieres
+    .map((mp) => {
+      const motsMp = new Set(normaliserTexte(mp.designation_interne))
+      if (motsMp.size === 0) return { mp, score: 0 }
+      const intersection = [...mots].filter((m) => motsMp.has(m)).length
+      const plusPetit = Math.min(mots.size, motsMp.size)
+      return { mp, score: plusPetit ? intersection / plusPetit : 0 }
+    })
+    .filter((s) => s.score > 0.2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n)
+    .map((s) => s.mp)
+}
+
+/**
+ * Liste, groupée par désignation unique, tous les ingrédients de recette
+ * encore en attente — pour un rapprochement groupé (une décision par
+ * désignation, appliquée à toutes les recettes qui l'utilisent d'un coup).
+ */
+export async function listerIngredientsEnAttenteGroupes() {
+  const [{ data: enAttente }, { data: matieres }, { data: recettesAll }, { data: elementsAll }] = await Promise.all([
+    supabase.from('recette_ingredients').select('id, designation_brute, recette_id, element_id').is('matiere_premiere_id', null).not('designation_brute', 'is', null),
+    supabase.from('matieres_premieres').select('id, designation_interne, unite'),
+    supabase.from('recettes').select('id, nom'),
+    supabase.from('recette_elements').select('id, recette_id'),
+  ])
+
+  const nomParRecetteId = Object.fromEntries((recettesAll || []).map((r) => [r.id, r.nom]))
+  const recetteIdParElementId = Object.fromEntries((elementsAll || []).map((e) => [e.id, e.recette_id]))
+
+  const groupes = {}
+  for (const ligne of enAttente || []) {
+    const cle = ligne.designation_brute.trim().toLowerCase()
+    groupes[cle] ||= { designation: ligne.designation_brute.trim(), ids: [], recettes: new Set() }
+    groupes[cle].ids.push(ligne.id)
+    const recetteId = ligne.recette_id || recetteIdParElementId[ligne.element_id]
+    if (nomParRecetteId[recetteId]) groupes[cle].recettes.add(nomParRecetteId[recetteId])
+  }
+
+  return {
+    groupes: Object.values(groupes)
+      .map((g) => ({ ...g, recettes: [...g.recettes], candidats: suggererCandidats(g.designation, matieres || []) }))
+      .sort((a, b) => b.ids.length - a.ids.length),
+    matieres: matieres || [],
+  }
+}
+
+/** Applique un rapprochement à toutes les lignes d'un groupe (même désignation) d'un coup. */
+export async function appliquerRapprochementGroupe(ids, matierePremiereId) {
+  await supabase.from('recette_ingredients').update({ matiere_premiere_id: matierePremiereId, designation_brute: null }).in('id', ids)
+}
+
+/**
  * Tente de rapprocher automatiquement toutes les lignes d'ingrédients "en attente"
  * (designation_brute renseignée, matiere_premiere_id encore vide) avec les articles
  * Mercuriale actuels. Ne force jamais un rapprochement ambigu — voir suggererMatierePremiere.
