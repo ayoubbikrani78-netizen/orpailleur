@@ -185,6 +185,7 @@ function normaliserTexte(s) {
     .replace(/[^a-z0-9 ]/g, ' ')
     .split(/\s+/)
     .filter(Boolean)
+    .map((mot) => (mot.length >= 4 && mot.endsWith('s') ? mot.slice(0, -1) : mot)) // singulier/pluriel naïf
 }
 
 /**
