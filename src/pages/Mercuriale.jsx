@@ -344,6 +344,9 @@ async function deleteMatierePremiere() {
                           <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap ${cov.color}`}>
                             {mp.couverture_stock ? `${mp.couverture_stock}j` : 'Pas de données'}
                           </span>
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">
+                            Stock : {mp.quantite_stock != null ? mp.quantite_stock : 0}{mp.unite ? ` ${mp.unite}` : ''}
+                          </span>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 whitespace-nowrap">{mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
                           <ChevronRight size={16} className="text-gray-400 shrink-0" />
                         </div>
