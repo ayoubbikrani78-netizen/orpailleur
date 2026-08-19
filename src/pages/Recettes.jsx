@@ -234,7 +234,7 @@ export default function Recettes() {
       </div>
       {rapprochementMessage && <p className="text-xs text-gray-500 mb-4">{rapprochementMessage}</p>}
 
-      <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 w-fit overflow-x-auto max-w-full">
+      <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 overflow-x-auto">
         <button
           onClick={() => setFamilleActive('Toutes')}
           className="px-4 py-2 rounded-md text-sm font-medium whitespace-nowrap transition-colors"

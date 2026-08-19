@@ -123,7 +123,7 @@ export default function CoutRevient() {
         <StatCard label="Composants" value={nbComposant} color="text-gray-500" />
       </div>
 
-      <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 w-fit overflow-x-auto max-w-full">
+      <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 overflow-x-auto">
         <TabButton active={atelierActif === 'Tous'} onClick={() => setAtelierActif('Tous')}>
           Tous <span className="text-xs text-gray-400 ml-1">{lignes.length}</span>
         </TabButton>
