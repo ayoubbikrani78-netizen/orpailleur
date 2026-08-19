@@ -30,6 +30,7 @@ export default function Mercuriale() {
   const [mouvements, setMouvements] = useState([])
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
+  const [rattrapageCodesEnCours, setRattrapageCodesEnCours] = useState(false)
   const [showSuggestionCategories, setShowSuggestionCategories] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
   const [query, setQuery] = useState('')
@@ -47,6 +48,23 @@ export default function Mercuriale() {
       fetchAll()
     } finally {
       setRattrapageEnCours(false)
+    }
+  }
+
+  async function lancerRattrapageCodes() {
+    setRattrapageCodesEnCours(true)
+    setRattrapageMessage('')
+    try {
+      const aTraiter = matieres.filter((mp) => mp.univers && !mp.code)
+      for (const mp of aTraiter) {
+        await assignerCodeSiManquant(mp.id, mp.univers)
+      }
+      setRattrapageMessage(aTraiter.length > 0
+        ? `Code attribué à ${aTraiter.length} article(s) déjà catégorisé(s).`
+        : 'Rien à rattraper — tous les articles catégorisés ont déjà un code.')
+      fetchAll()
+    } finally {
+      setRattrapageCodesEnCours(false)
     }
   }
 
@@ -189,6 +207,7 @@ async function deleteMatierePremiere() {
   }
 
   const nbNonCategorises = matieres.filter((mp) => !mp.univers).length
+  const nbCodesManquants = matieres.filter((mp) => mp.univers && !mp.code).length
   const [selection, setSelection] = useState(new Set())
 
   function toggleSelection(id) {
@@ -252,6 +271,11 @@ async function deleteMatierePremiere() {
           <button onClick={lancerRattrapageCmup} disabled={rattrapageEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
             <RefreshCw size={16} className={rattrapageEnCours ? 'animate-spin' : ''} /> {rattrapageEnCours ? 'Recalcul...' : 'Recalculer les CMUP'}
           </button>
+          {nbCodesManquants > 0 && (
+            <button onClick={lancerRattrapageCodes} disabled={rattrapageCodesEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
+              <RefreshCw size={16} className={rattrapageCodesEnCours ? 'animate-spin' : ''} /> {rattrapageCodesEnCours ? 'Attribution...' : `Attribuer les codes (${nbCodesManquants})`}
+            </button>
+          )}
           <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
             <Plus size={16} /> Ajouter une matière première
           </button>
