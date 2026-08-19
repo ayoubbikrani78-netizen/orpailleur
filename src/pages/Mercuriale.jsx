@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { rattraperCmupHistorique } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import CategoryPicker from '../components/CategoryPicker'
-import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw, Search } from 'lucide-react'
+import SuggestionCategoriesModal from '../components/SuggestionCategoriesModal'
+import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw, Search, Sparkles } from 'lucide-react'
 
 const EMPTY_MP = {
   univers: '', famille: '', designation_interne: '', unite: '', stock_mini: '',
@@ -28,6 +29,7 @@ export default function Mercuriale() {
   const [mouvements, setMouvements] = useState([])
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
+  const [showSuggestionCategories, setShowSuggestionCategories] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
   const [query, setQuery] = useState('')
   const [universActif, setUniversActif] = useState('Tous')
@@ -184,11 +186,18 @@ async function deleteMatierePremiere() {
     fetchAll()
   }
 
+  const nbNonCategorises = matieres.filter((mp) => !mp.univers).length
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Mercuriale</h2>
         <div className="flex items-center gap-2">
+          {nbNonCategorises > 0 && (
+            <button onClick={() => setShowSuggestionCategories(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-200 bg-orange-50">
+              <Sparkles size={16} /> Suggérer les catégories ({nbNonCategorises})
+            </button>
+          )}
           <button onClick={lancerRattrapageCmup} disabled={rattrapageEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
             <RefreshCw size={16} className={rattrapageEnCours ? 'animate-spin' : ''} /> {rattrapageEnCours ? 'Recalcul...' : 'Recalculer les CMUP'}
           </button>
@@ -325,6 +334,15 @@ async function deleteMatierePremiere() {
           onUpdateCategorie={updateCategorie}
           onDelete={deleteMatierePremiere}
           getCouvertureColor={getCouvertureColor}
+        />
+      )}
+
+      {showSuggestionCategories && (
+        <SuggestionCategoriesModal
+          matieres={matieres.filter((mp) => !mp.univers)}
+          categories={categories}
+          onClose={() => setShowSuggestionCategories(false)}
+          onDone={fetchAll}
         />
       )}
     </div>
