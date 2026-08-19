@@ -328,21 +328,21 @@ async function deleteMatierePremiere() {
                   {filtrees.map((mp) => {
                     const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
                     return (
-                      <div key={mp.id} className="flex items-center justify-between px-6 py-4 hover:bg-gray-50">
-                        <div className="flex items-center gap-3">
-                          <input type="checkbox" checked={selection.has(mp.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelection(mp.id)} />
-                          <span className={`w-2 h-2 rounded-full ${cov.dot}`} />
-                          <span className="font-medium text-gray-800 cursor-pointer" onClick={() => openDetail(mp)}>{mp.designation_interne}</span>
-                          {universActif === 'Tous' && (
-                            <span className="text-[10px] text-gray-400">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
+                      <div key={mp.id} className="flex items-center justify-between gap-3 px-6 py-4 hover:bg-gray-50">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <input type="checkbox" className="shrink-0" checked={selection.has(mp.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelection(mp.id)} />
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${cov.dot}`} />
+                          <span className="font-medium text-gray-800 cursor-pointer truncate" onClick={() => openDetail(mp)}>{mp.designation_interne}</span>
+                          {universActif === 'Tous' && (mp.univers || mp.famille) && (
+                            <span className="text-[10px] text-gray-400 truncate shrink whitespace-nowrap hidden lg:inline">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-4 cursor-pointer" onClick={() => openDetail(mp)}>
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${cov.color}`}>
-                            {mp.couverture_stock ? `${mp.couverture_stock}j de stock` : 'Pas encore de données'}
+                        <div className="flex items-center gap-3 shrink-0 cursor-pointer" onClick={() => openDetail(mp)}>
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap ${cov.color}`}>
+                            {mp.couverture_stock ? `${mp.couverture_stock}j` : 'Pas de données'}
                           </span>
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500">CMUP : {mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
-                          <ChevronRight size={16} className="text-gray-400" />
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-500 whitespace-nowrap">{mp.cmp ? `${mp.cmp.toFixed(5)}€` : '—'}</span>
+                          <ChevronRight size={16} className="text-gray-400 shrink-0" />
                         </div>
                       </div>
                     )
