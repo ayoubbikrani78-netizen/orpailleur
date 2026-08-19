@@ -118,18 +118,21 @@ Ne confonds pas avec un ingrédient brut destiné à être transformé (farine, 
 - Attention aux nombres qui décrivent une CONTENANCE d'un contenant plutôt qu'une quantité de produit achetée : ex. "SACS POUBELLES 130L" (sacs conçus pour contenir 130 litres de déchets, pas 130L de produit), "BAC RECT 20L 53X40 H14CM" (un bac de rangement d'une contenance de 20L — tu achètes des bacs vides, pas 20L de quelque chose), "SEAU 5L" quand c'est le nom d'un contenant vide vendu comme ustensile. Dans ces cas, ignore ce nombre et réponds "1piece" par bac/contenant acheté (ou le comptage d'unités s'il y en a un, ex: "20u x 5" -> "100piece"). Ne confonds jamais la contenance d'un contenant avec le poids/volume d'un produit alimentaire conditionné dedans (ex: "OEUF ENTIER LIQUIDE BIB 5L" est bien 5L de produit, car c'est un aliment liquide vendu par le volume — la distinction se fait sur si le nom désigne un ustensile/contenant vide ou un aliment).
 
 === CATÉGORISATION (univers_suggere / famille_suggere) ===
-Propose une catégorie pour chaque ligne produit, en te basant UNIQUEMENT sur son nom — c'est une suggestion que le boulanger pourra corriger, pas un calcul, donc reste dans la liste ci-dessous et n'invente pas de nouvelle catégorie. Si tu hésites vraiment entre plusieurs familles, choisis la plus probable plutôt que de laisser vide ; ne laisse vide ("") que si le produit ne correspond à aucun univers de la liste.
+Propose une catégorie pour chaque ligne produit, en te basant UNIQUEMENT sur son nom — c'est une suggestion que le boulanger pourra corriger, pas un calcul, donc reste dans la liste ci-dessous et n'invente pas de nouvelle catégorie. Si tu hésites vraiment entre plusieurs sous-catégories, choisis la plus probable plutôt que de laisser vide ; ne laisse vide ("") que si le produit ne correspond à aucune catégorie de la liste. Ne catégorise jamais un "PRALINE ... MAISON" ou tout autre produit visiblement fabriqué en interne (laisse univers_suggere et famille_suggere vides).
 
-Univers disponibles et leurs familles :
-- BOISSON : CAFE, EAU, EAU AROMATISE, EAU GAZEUSE, JUS, JUS PRESSE, SIROP, SODA, THE, THE FRAIS
-- BOULANGERIE : EAU ROBINET, HYGIÈNE & ENTRETIEN, ÉPICERIE
-- FOURNITURE ALIMENTAIRE : ÉPICERIE
-- PAIN : MEUNERIE
-- PÂTISSERIE : CRÈMERIE, FRUITS FRAIS, LÉGUMES FRAIS, MEUNERIE, RECYCLING, SURGELE, ÉPICERIE
-- SNACKING : CHARCUTERIE, CRÈMERIE, EPICERIE, FRAIS, LÉGUMES FRAIS, SURGELE, ÉPICERIE
-- VIENNOISERIE : CRÈMERIE, MEUNERIE, SURGELE, ÉPICERIE
+Catégories disponibles et leurs sous-catégories (inspirées des rayons de grande surface) :
+- Boissons : Café & thé, Eaux, Jus & nectars, Sirops, Sodas, Énergisants
+- Consommables : Jetables, Nettoyage, Papeterie caisse, Ustensiles pâtisserie
+- Crèmerie : Beurre, Crèmes, Fromages, Lait, Œufs
+- Fruits & Légumes frais : Fruits frais, Légumes frais
+- Fruits secs & oléagineux : Fruits séchés, Oléagineux
+- Meunerie : Farines, Graines, Mix & améliorants pain
+- Surgelés : Fruits surgelés, Pâtisserie surgelée, Snacking surgelé, Viennoiserie surgelée
+- Traiteur / Snacking salé : Charcuterie, Fromages snacking, Pizza, Poissons, Sauces & condiments traiteur
+- Épicerie : Condiments & assaisonnements, Conserves, Huiles
+- Épicerie sucrée : Additifs & texturants, Arômes & colorants, Chocolat & cacao, Décors & finitions, Sucres & édulcorants
 
-Exemples : "COCA COLA UE 33CLx24" -> univers_suggere="BOISSON", famille_suggere="SODA". "BEURRE DOUX AOP CHARENTES" -> univers_suggere="PÂTISSERIE", famille_suggere="CRÈMERIE" (ingrédient de recette) ou "SNACKING"/"CRÈMERIE" si le contexte de la facture est clairement snacking — choisis PÂTISSERIE par défaut pour un ingrédient générique. "FARINE T55 TRADITION" -> univers_suggere="PAIN", famille_suggere="MEUNERIE". "CROISSANT SECRETS 75gx144" -> univers_suggere="VIENNOISERIE", famille_suggere="ÉPICERIE". "SAUMON FUME TRANCHE" -> univers_suggere="SNACKING", famille_suggere="CHARCUTERIE". "SALADE ICEBERG" -> univers_suggere="SNACKING", famille_suggere="LÉGUMES FRAIS".`
+Exemples : "COCA COLA UE 33CLx24" -> univers_suggere="Boissons", famille_suggere="Sodas". "BEURRE DOUX AOP CHARENTES" -> univers_suggere="Crèmerie", famille_suggere="Beurre". "FARINE PANIF PRESTIGE 25KG" -> univers_suggere="Meunerie", famille_suggere="Farines". "CROISSANT SECRETS 75gx144" -> univers_suggere="Surgelés", famille_suggere="Viennoiserie surgelée". "SAUMON FUME TRANCHE" -> univers_suggere="Traiteur / Snacking salé", famille_suggere="Poissons". "SALADE ICEBERG" -> univers_suggere="Fruits & Légumes frais", famille_suggere="Légumes frais". "AMANDE ENTIERE BRUTE DECORTIQUE" -> univers_suggere="Fruits secs & oléagineux", famille_suggere="Oléagineux". "CHOC NOIR EXCELLENCE 55%" -> univers_suggere="Épicerie sucrée", famille_suggere="Chocolat & cacao". "HUILE OLIVE EXTRA VIERGE" -> univers_suggere="Épicerie", famille_suggere="Huiles". "Gant nitril noir non poudré" -> univers_suggere="Consommables", famille_suggere="Jetables".`
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
