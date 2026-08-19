@@ -329,8 +329,8 @@ async function deleteMatierePremiere() {
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between gap-3 px-6 py-2 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
                     <span>Désignation</span>
-                    <div className="flex items-center gap-3 shrink-0">
-                      <span className="w-20 text-center">Couverture</span>
+                    <div className="flex items-center gap-5 shrink-0">
+                      <span className="w-28 text-center">Couverture</span>
                       <span className="w-20 text-center">Stock</span>
                       <span className="w-20 text-center">CMUP</span>
                       <span className="w-4" />
@@ -350,8 +350,8 @@ async function deleteMatierePremiere() {
                             <span className="text-[10px] text-gray-400 truncate shrink whitespace-nowrap hidden lg:inline">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 shrink-0 cursor-pointer" onClick={() => openDetail(mp)}>
-                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap w-20 text-center ${cov.color}`}>
+                        <div className="flex items-center gap-5 shrink-0 cursor-pointer" onClick={() => openDetail(mp)}>
+                          <span className={`text-xs px-2.5 py-1 rounded-full font-medium whitespace-nowrap w-28 text-center ${cov.color}`}>
                             {mp.couverture_stock ? `${mp.couverture_stock}j` : 'Pas de données'}
                           </span>
                           <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap w-20 text-center">
