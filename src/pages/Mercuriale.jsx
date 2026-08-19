@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { rattraperCmupHistorique } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
+import { assignerCodeSiManquant } from '../lib/regroupement'
 import CategoryPicker from '../components/CategoryPicker'
 import SuggestionCategoriesModal from '../components/SuggestionCategoriesModal'
 import { Plus, ChevronRight, X, TrendingUp, TrendingDown, RefreshCw, Search, Sparkles, Download, Trash2 } from 'lucide-react'
@@ -120,6 +121,7 @@ export default function Mercuriale() {
   async function updateCategorie(univers, famille) {
     await assurerCategorie(univers, famille)
     await supabase.from('matieres_premieres').update({ univers: univers || null, famille: famille || null }).eq('id', selected.id)
+    if (univers) await assignerCodeSiManquant(selected.id, univers)
     setSelected({ ...selected, univers, famille })
     fetchAll()
   }
@@ -218,13 +220,13 @@ async function deleteMatierePremiere() {
   }
 
   function exporterCsv(liste) {
-    const entetes = ['Désignation', 'Catégorie', 'Sous-catégorie', 'Unité', 'CMUP (€)', 'Stock actuel', 'Couverture (jours)', 'Stock mini']
+    const entetes = ['Référence interne', 'Désignation', 'Catégorie', 'Sous-catégorie', 'Unité', 'CMUP (€)', 'Stock actuel', 'Couverture (jours)', 'Stock mini']
     const echapper = (v) => {
       const s = v == null ? '' : String(v)
       return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
     }
     const lignes = liste.map((mp) => [
-      mp.designation_interne, mp.univers || '', mp.famille || '', mp.unite || '',
+      mp.code || '', mp.designation_interne, mp.univers || '', mp.famille || '', mp.unite || '',
       mp.cmp != null ? mp.cmp.toFixed(5) : '', mp.quantite_stock ?? '', mp.couverture_stock ?? '', mp.stock_mini ?? ''
     ])
     const csv = [entetes, ...lignes].map((l) => l.map(echapper).join(';')).join('\r\n')
@@ -332,6 +334,7 @@ async function deleteMatierePremiere() {
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <input type="checkbox" className="shrink-0" checked={selection.has(mp.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelection(mp.id)} />
                           <span className={`w-2 h-2 rounded-full shrink-0 ${cov.dot}`} />
+                          {mp.code && <span className="text-[10px] font-mono text-gray-400 shrink-0">{mp.code}</span>}
                           <span className="font-medium text-gray-800 cursor-pointer truncate" onClick={() => openDetail(mp)}>{mp.designation_interne}</span>
                           {universActif === 'Tous' && (mp.univers || mp.famille) && (
                             <span className="text-[10px] text-gray-400 truncate shrink whitespace-nowrap hidden lg:inline">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
@@ -435,7 +438,7 @@ function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, cor
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-y-auto p-8">
         <div className="flex items-center justify-between mb-4">
-  <h3 className="text-lg font-bold text-gray-800">{mp.designation_interne}</h3>
+  <h3 className="text-lg font-bold text-gray-800">{mp.code && <span className="font-mono text-gray-400 mr-2">{mp.code}</span>}{mp.designation_interne}</h3>
   <div className="flex items-center gap-3">
     <button onClick={onDelete} className="text-sm text-red-500 hover:text-red-700 font-medium">Supprimer</button>
     <button onClick={onClose}><X size={20} className="text-gray-400" /></button>

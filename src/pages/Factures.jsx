@@ -5,6 +5,7 @@ import { extractInvoiceData } from '../lib/ocr'
 import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { CategoryPickerCompact } from '../components/CategoryPicker'
+import { trouverArticleCorrespondant, assignerCodeSiManquant } from '../lib/regroupement'
 
 const STATUT_CONFIG = {
   en_cours: { label: 'En cours de traitement', color: 'bg-blue-50 text-blue-500', icon: Loader },
@@ -14,6 +15,7 @@ const STATUT_CONFIG = {
 
 export default function Factures() {
   const [factures, setFactures] = useState([])
+  const [messageFusion, setMessageFusion] = useState(null)
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -254,6 +256,12 @@ export default function Factures() {
 
     const echecs = []
     const nouveaux = []
+    const fusionnes = []
+
+    // Chargé une seule fois : sert à reconnaître qu'un article "nouveau" pour CE fournisseur
+    // correspond en réalité à un article déjà connu d'un AUTRE fournisseur (même produit,
+    // désignation différente) — pour que le CMUP se calcule sur l'ensemble des fournisseurs.
+    const { data: matieresExistantes } = await supabase.from('matieres_premieres').select('id, designation_interne, univers')
 
     for (const ligne of lignes) {
       if (!ligne.designation) continue
@@ -312,6 +320,33 @@ export default function Factures() {
           })
         }
       } else {
+        const articleCorrespondant = trouverArticleCorrespondant(ligne.designation, matieresExistantes || [])
+
+        if (articleCorrespondant) {
+          // Même article, autre fournisseur : on rattache à la fiche existante plutôt que
+          // d'en créer une nouvelle, pour que le CMUP se calcule sur les deux fournisseurs.
+          const { error: errInsertLien } = await supabase.from('matieres_premieres_fournisseurs').insert({
+            matiere_premiere_id: articleCorrespondant.id,
+            fournisseur_id: fournisseurId,
+            reference_fournisseur: ligne.reference,
+            designation_fournisseur: ligne.designation,
+            conditionnement: conditionnement,
+            unite: ligne.unite,
+            prix_actuel: prixUnitaire,
+            prix_initial: prixUnitaire,
+            prix_g_u_ml: prixGUML
+          })
+
+          if (errInsertLien) {
+            console.error(`Ventilation mercuriale — échec de liaison (article existant) pour "${ligne.designation}":`, errInsertLien)
+            echecs.push(ligne.designation)
+            continue
+          }
+
+          fusionnes.push({ designation: ligne.designation, articleExistant: articleCorrespondant.designation_interne })
+          continue
+        }
+
         const { data: nouvelleMp, error: errInsertMp } = await supabase
           .from('matieres_premieres')
           .insert({
@@ -364,7 +399,7 @@ export default function Factures() {
       // le rapprochement automatiquement, sans bloquer la validation de la facture.
       reconcilierIngredientsEnAttente().catch((e) => console.error('Rapprochement recettes en attente échoué :', e))
     }
-    return { echecs, nouveaux }
+    return { echecs, nouveaux, fusionnes }
   }
 
   async function validerFacture() {
@@ -386,10 +421,13 @@ export default function Factures() {
       }).eq('id', selected.id)
 
       if (selected.fournisseur_id) {
-        const { echecs: echecsVentilation, nouveaux } = await ventilerVersMercuriale(selected.id, selected.fournisseur_id)
+        const { echecs: echecsVentilation, nouveaux, fusionnes } = await ventilerVersMercuriale(selected.id, selected.fournisseur_id)
         await preparerMiseAJourStock(selected.id, selected.fournisseur_id, nouveaux)
         if (echecsVentilation && echecsVentilation.length > 0) {
           alert(`Attention : ${echecsVentilation.length} article(s) n'ont pas pu être ajoutés à la mercuriale (erreur technique) : ${echecsVentilation.join(', ')}. Vérifie la console ou réessaie de valider cette facture.`)
+        }
+        if (fusionnes && fusionnes.length > 0) {
+          setMessageFusion(fusionnes)
         }
       }
 
@@ -474,6 +512,7 @@ export default function Factures() {
             univers: item.univers || null,
             famille: item.famille || null
           }).eq('id', item.matiere_premiere_id)
+          if (item.univers) await assignerCodeSiManquant(item.matiere_premiere_id, item.univers)
         }
         // Si la quantité ou l'unité ont été corrigées manuellement (nouveau produit ou déjà connu),
         // on réécrit conditionnement/unité dans le catalogue : la correction faite maintenant, une
@@ -527,6 +566,20 @@ async function deleteFacture() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Corbeille factures</h2>
       </div>
+
+      {messageFusion && (
+        <div className="flex items-start justify-between gap-3 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-6 text-sm text-blue-700">
+          <div>
+            <p className="font-medium mb-1">{messageFusion.length} article(s) rattaché(s) à une fiche déjà existante (autre fournisseur, même produit) :</p>
+            <ul className="text-xs space-y-0.5">
+              {messageFusion.map((f, i) => (
+                <li key={i}>"{f.designation}" → {f.articleExistant}</li>
+              ))}
+            </ul>
+          </div>
+          <button onClick={() => setMessageFusion(null)} className="text-blue-400 hover:text-blue-600 shrink-0"><X size={16} /></button>
+        </div>
+      )}
 
       {/* Zone de dépôt */}
       <div

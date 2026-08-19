@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { suggererCategoriesEnMasse } from '../lib/categoriser'
+import { assignerCodeSiManquant } from '../lib/regroupement'
 import CategoryPicker from './CategoryPicker'
 import { X, Loader2, CheckCircle2 } from 'lucide-react'
 
@@ -37,6 +38,7 @@ export default function SuggestionCategoriesModal({ matieres, categories, onClos
     const aAppliquer = lignes.filter((l) => l.univers && l.famille)
     for (const l of aAppliquer) {
       await supabase.from('matieres_premieres').update({ univers: l.univers, famille: l.famille }).eq('id', l.id)
+      await assignerCodeSiManquant(l.id, l.univers)
     }
     onDone()
     onClose()
