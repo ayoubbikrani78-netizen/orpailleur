@@ -328,7 +328,12 @@ async function deleteMatierePremiere() {
                 </div>
                 <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                   <div className="flex items-center justify-between gap-3 px-6 py-2 bg-gray-50 border-b border-gray-200 text-[11px] font-semibold text-gray-400 uppercase tracking-wide">
-                    <span>Désignation</span>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="w-4 shrink-0" />
+                      <span className="w-2 shrink-0" />
+                      <span className="w-14 shrink-0">Code</span>
+                      <span>Désignation</span>
+                    </div>
                     <div className="flex items-center gap-5 shrink-0">
                       <span className="w-28 text-center">Couverture</span>
                       <span className="w-20 text-center">Stock</span>
@@ -344,7 +349,7 @@ async function deleteMatierePremiere() {
                         <div className="flex items-center gap-3 min-w-0 flex-1">
                           <input type="checkbox" className="shrink-0" checked={selection.has(mp.id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleSelection(mp.id)} />
                           <span className={`w-2 h-2 rounded-full shrink-0 ${cov.dot}`} />
-                          {mp.code && <span className="text-[10px] font-mono text-gray-400 shrink-0">{mp.code}</span>}
+                          <span className="text-xs font-mono text-gray-500 shrink-0 w-14">{mp.code || '—'}</span>
                           <span className="font-medium text-gray-800 cursor-pointer truncate" onClick={() => openDetail(mp)}>{mp.designation_interne}</span>
                           {universActif === 'Tous' && (mp.univers || mp.famille) && (
                             <span className="text-[10px] text-gray-400 truncate shrink whitespace-nowrap hidden lg:inline">{mp.univers || 'Non catégorisé'}{mp.famille ? ` · ${mp.famille}` : ''}</span>
