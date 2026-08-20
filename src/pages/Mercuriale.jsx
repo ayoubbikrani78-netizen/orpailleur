@@ -12,14 +12,9 @@ const EMPTY_MP = {
   seuil_rouge: 3, seuil_orange: 7
 }
 
-const EMPTY_FOURNISSEUR_LINK = {
-  fournisseur_id: '', reference_fournisseur: '', designation_fournisseur: '',
-  conditionnement: '', prix_actuel: ''
-}
 
 export default function Mercuriale() {
   const [matieres, setMatieres] = useState([])
-  const [fournisseurs, setFournisseurs] = useState([])
   const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -72,10 +67,8 @@ export default function Mercuriale() {
 
   async function fetchAll() {
     const { data: mp } = await supabase.from('matieres_premieres').select('*').order('designation_interne')
-    const { data: f } = await supabase.from('fournisseurs').select('*').eq('etat', 'actif').order('nom')
     const { data: cat } = await supabase.from('categories_mercuriale').select('*').order('univers').order('famille')
     setMatieres(mp || [])
-    setFournisseurs(f || [])
     setCategories(cat || [])
     setLoading(false)
   }
@@ -160,34 +153,6 @@ async function deleteMatierePremiere() {
   setShowDetail(false)
   fetchAll()
 }
-
-  function calculerPrixUnitaireBase(prix, conditionnement, unite) {
-    if (!prix || !conditionnement) return 0
-    const p = parseFloat(prix)
-    const c = parseFloat(conditionnement)
-    const u = (unite || '').toLowerCase()
-    if (u === 'kg') return p / (c * 1000)
-    if (u === 'l') return p / (c * 1000)
-    if (u === 'g' || u === 'ml') return p / c
-    return p / c
-  }
-
-  async function addFournisseurLink(mpId, link) {
-    if (!link.fournisseur_id || !link.designation_fournisseur) return alert('Fournisseur et désignation requis')
-    const prixBase = calculerPrixUnitaireBase(link.prix_actuel, link.conditionnement, selected?.unite)
-    await supabase.from('matieres_premieres_fournisseurs').insert({
-      matiere_premiere_id: mpId,
-      fournisseur_id: link.fournisseur_id,
-      reference_fournisseur: link.reference_fournisseur,
-      designation_fournisseur: link.designation_fournisseur,
-      conditionnement: link.conditionnement,
-      unite: link.unite,
-      prix_actuel: link.prix_actuel,
-      prix_initial: link.prix_actuel,
-      prix_g_u_ml: prixBase
-    })
-    openDetail(selected)
-  }
 
   async function saveCorrectionStock() {
     if (!correctionStock.raison) return alert('La raison de la correction est obligatoire')
@@ -459,14 +424,12 @@ async function deleteMatierePremiere() {
       {showDetail && selected && (
         <MercurialeDetail
           mp={selected}
-          fournisseurs={fournisseurs}
           categories={categories}
           liens={liens}
           mouvements={mouvements}
           correctionStock={correctionStock}
           setCorrectionStock={setCorrectionStock}
           onClose={() => setShowDetail(false)}
-          onAddLink={(link) => addFournisseurLink(selected.id, link)}
           onSaveCorrection={saveCorrectionStock}
           onUpdateCategorie={updateCategorie}
           onDelete={deleteMatierePremiere}
@@ -487,8 +450,7 @@ async function deleteMatierePremiere() {
 }
 
 
-function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, correctionStock, setCorrectionStock, onClose, onAddLink, onSaveCorrection, onUpdateCategorie, onDelete, getCouvertureColor }) {
-  const [newLink, setNewLink] = useState(EMPTY_FOURNISSEUR_LINK)
+function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectionStock, onClose, onSaveCorrection, categories, onUpdateCategorie, onDelete, getCouvertureColor }) {
   const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
 
   return (
@@ -526,10 +488,10 @@ function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, cor
           </div>
         </div>
 
-        {/* Fournisseurs liés */}
+        {/* Fournisseurs liés — lecture seule, la liaison se fait automatiquement à l'import des factures */}
         <h4 className="text-sm font-semibold text-gray-700 mb-3">Fournisseurs</h4>
-        <div className="space-y-2 mb-4">
-          {liens.length === 0 && <p className="text-sm text-gray-400">Aucun fournisseur lié.</p>}
+        <div className="space-y-2 mb-6">
+          {liens.length === 0 && <p className="text-sm text-gray-400">Aucun fournisseur lié pour l'instant — se remplit automatiquement à l'import d'une facture.</p>}
           {liens.map(l => (
             <div key={l.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
               <div>
@@ -542,24 +504,6 @@ function MercurialeDetail({ mp, fournisseurs, categories, liens, mouvements, cor
               </div>
             </div>
           ))}
-        </div>
-
-        {/* Ajout fournisseur */}
-        <div className="border border-gray-200 rounded-lg p-4 mb-6">
-          <p className="text-xs font-medium text-gray-500 mb-3">Lier un fournisseur</p>
-          <div className="grid grid-cols-2 gap-3">
-            <select className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newLink.fournisseur_id} onChange={e => setNewLink({ ...newLink, fournisseur_id: e.target.value })}>
-              <option value="">Sélectionner fournisseur</option>
-              {fournisseurs.map(f => <option key={f.id} value={f.id}>{f.nom}</option>)}
-            </select>
-            <input placeholder="Réf. article fournisseur" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newLink.reference_fournisseur} onChange={e => setNewLink({ ...newLink, reference_fournisseur: e.target.value })} />
-            <input placeholder="Désignation fournisseur" className="border border-gray-200 rounded-lg px-3 py-2 text-sm col-span-2" value={newLink.designation_fournisseur} onChange={e => setNewLink({ ...newLink, designation_fournisseur: e.target.value })} />
-            <input type="number" placeholder="Conditionnement" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newLink.conditionnement} onChange={e => setNewLink({ ...newLink, conditionnement: e.target.value })} />
-            <input type="number" placeholder="Prix (€)" className="border border-gray-200 rounded-lg px-3 py-2 text-sm" value={newLink.prix_actuel} onChange={e => setNewLink({ ...newLink, prix_actuel: e.target.value })} />
-          </div>
-          <button onClick={() => { onAddLink(newLink); setNewLink(EMPTY_FOURNISSEUR_LINK) }} className="mt-3 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-            Ajouter
-          </button>
         </div>
 
         {/* Correction de stock */}
