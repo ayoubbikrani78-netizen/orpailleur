@@ -223,19 +223,33 @@ async function deleteMatierePremiere() {
     const ids = [...selection]
 
     // Restaure la désignation sur les lignes de recette avant de couper le lien, pour ne rien perdre
-    const { data: lignesLiees } = await supabase.from('recette_ingredients').select('id, matiere_premiere_id').in('matiere_premiere_id', ids)
+    const { data: lignesLiees, error: errLignes } = await supabase.from('recette_ingredients').select('id, matiere_premiere_id').in('matiere_premiere_id', ids)
+    if (errLignes) return alert(`Échec (lecture recettes liées) : ${errLignes.message}`)
+
     for (const ligne of lignesLiees || []) {
       const mp = matieres.find((m) => m.id === ligne.matiere_premiere_id)
-      await supabase.from('recette_ingredients').update({ matiere_premiere_id: null, designation_brute: mp?.designation_interne || 'Article supprimé' }).eq('id', ligne.id)
+      const { error } = await supabase.from('recette_ingredients').update({ matiere_premiere_id: null, designation_brute: mp?.designation_interne || 'Article supprimé' }).eq('id', ligne.id)
+      if (error) return alert(`Échec (détachement recette) : ${error.message}`)
     }
-    await supabase.from('recettes').update({ matiere_premiere_id: null }).in('matiere_premiere_id', ids)
-    await supabase.from('mouvements_stock').delete().in('matiere_premiere_id', ids)
-    await supabase.from('matieres_premieres_fournisseurs').delete().in('matiere_premiere_id', ids)
-    await supabase.from('alertes').delete().in('reference_id', ids).eq('reference_table', 'matieres_premieres')
-    await supabase.from('matieres_premieres').delete().in('id', ids)
+
+    let error = (await supabase.from('recettes').update({ matiere_premiere_id: null }).in('matiere_premiere_id', ids)).error
+    if (error) return alert(`Échec (détachement composants) : ${error.message}`)
+
+    error = (await supabase.from('mouvements_stock').delete().in('matiere_premiere_id', ids)).error
+    if (error) return alert(`Échec (mouvements de stock) : ${error.message}`)
+
+    error = (await supabase.from('matieres_premieres_fournisseurs').delete().in('matiere_premiere_id', ids)).error
+    if (error) return alert(`Échec (liens fournisseurs) : ${error.message}\n\nSi l'erreur mentionne "commandes_lignes", des commandes existent encore pour ces articles — dis-le moi, j'ajouterai leur suppression aussi.`)
+
+    error = (await supabase.from('alertes').delete().in('reference_id', ids).eq('reference_table', 'matieres_premieres')).error
+    if (error) return alert(`Échec (alertes) : ${error.message}`)
+
+    error = (await supabase.from('matieres_premieres').delete().in('id', ids)).error
+    if (error) return alert(`Échec (suppression finale) : ${error.message}`)
 
     setSelection(new Set())
-    fetchAll()
+    await fetchAll()
+    alert(`${ids.length} article(s) supprimé(s).`)
   }
 
   function exporterCsv(liste) {
