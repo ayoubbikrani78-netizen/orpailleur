@@ -68,7 +68,11 @@ export default function Mercuriale() {
   async function fetchAll() {
     const { data: mp } = await supabase.from('matieres_premieres').select('*').order('designation_interne')
     const { data: cat } = await supabase.from('categories_mercuriale').select('*').order('univers').order('famille')
-    setMatieres(mp || [])
+    // Exclut les articles virtuels liés à une Base/Appareil (Base et Appareils) : ce sont des
+    // composants internes, pas de vrais achats, ils n'ont rien à faire dans la Mercuriale.
+    const { data: baseIds } = await supabase.from('recettes').select('matiere_premiere_id').eq('est_composant', true).not('matiere_premiere_id', 'is', null)
+    const idsAExclure = new Set((baseIds || []).map((r) => r.matiere_premiere_id))
+    setMatieres((mp || []).filter((m) => !idsAExclure.has(m.id)))
     setCategories(cat || [])
     setLoading(false)
   }

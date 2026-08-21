@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { calculerCoutRevient, resoudreCmup, uniteesCompatibles, quantiteEnBase } from '../lib/coutRevient'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
+import { creerBase } from '../lib/bases'
 import ImporterRecetteModal from '../components/ImporterRecetteModal'
 import RapprochementMasseModal from '../components/RapprochementMasseModal'
 import { Plus, ChevronRight, X, Trash2, Search, AlertTriangle, Layers, Upload, RefreshCw } from 'lucide-react'
 
-const EMPTY_RECETTE = {
-  famille: '', nom: '', atelier_id: '', qte_produit: 1, volume_prod: 1,
+const EMPTY_BASE = {
+  famille: '', nom: '', unite: 'g', atelier_id: '', qte_produit: 1, volume_prod: 1,
   tps_prepa_min: '', tps_cuisson_min: 0, packaging_u: 0,
 }
 const EMPTY_INGREDIENT = { matiere_premiere_id: '', quantite: '', unite: 'g' }
 
-export default function Recettes() {
+export default function BaseEtAppareils() {
   const [recettes, setRecettes] = useState([])
   const [ateliers, setAteliers] = useState([])
   const [matieres, setMatieres] = useState([])
@@ -27,7 +28,7 @@ export default function Recettes() {
   const [showRapprochementMasse, setShowRapprochementMasse] = useState(false)
   const [rapprochementEnCours, setRapprochementEnCours] = useState(false)
   const [rapprochementMessage, setRapprochementMessage] = useState('')
-  const [form, setForm] = useState(EMPTY_RECETTE)
+  const [form, setForm] = useState(EMPTY_BASE)
   const [query, setQuery] = useState('')
   const [familleActive, setFamilleActive] = useState('Toutes')
   const [newElementNom, setNewElementNom] = useState('')
@@ -107,33 +108,34 @@ export default function Recettes() {
       })
     : null
 
+  const basesSeules = useMemo(() => recettes.filter((r) => r.est_composant), [recettes])
+
   const familles = useMemo(() => {
     const compte = {}
-    for (const r of recettes) compte[r.famille] = (compte[r.famille] || 0) + 1
+    for (const r of basesSeules) compte[r.famille] = (compte[r.famille] || 0) + 1
     return Object.entries(compte).sort((a, b) => a[0].localeCompare(b[0]))
-  }, [recettes])
+  }, [basesSeules])
 
-  const filtered = recettes
+  const filtered = basesSeules
     .filter((r) => r.nom.toLowerCase().includes(query.toLowerCase()))
     .filter((r) => familleActive === 'Toutes' || r.famille === familleActive)
 
   // ---- Actions ----
-  async function createRecette() {
+  async function creerBaseHandler() {
     if (!form.nom || !form.famille) return alert('Famille et nom sont obligatoires')
-    const { data, error } = await supabase.from('recettes').insert({
-      famille: form.famille, nom: form.nom,
-      atelier_id: form.atelier_id || null,
-      qte_produit: parseFloat(form.qte_produit) || 1,
-      volume_prod: parseFloat(form.volume_prod) || 1,
-      tps_prepa_min: form.tps_prepa_min === '' ? null : parseFloat(form.tps_prepa_min),
-      tps_cuisson_min: parseFloat(form.tps_cuisson_min) || 0,
-      packaging_u: parseFloat(form.packaging_u) || 0,
-    }).select().single()
-    if (error) return alert(error.message)
-    setShowForm(false)
-    setForm(EMPTY_RECETTE)
-    await fetchAll()
-    setSelectedId(data.id)
+    try {
+      const { recette } = await creerBase({
+        nom: form.nom, famille: form.famille, unite: form.unite,
+        atelierId: form.atelier_id, qteProduit: form.qte_produit, volumeProd: form.volume_prod,
+        tpsPrepaMin: form.tps_prepa_min, tpsCuissonMin: form.tps_cuisson_min, packagingU: form.packaging_u,
+      })
+      setShowForm(false)
+      setForm(EMPTY_BASE)
+      await fetchAll()
+      setSelectedId(recette.id)
+    } catch (e) {
+      alert(`Échec de la création : ${e.message}`)
+    }
   }
 
   async function updateSelected(patch) {
@@ -142,8 +144,19 @@ export default function Recettes() {
   }
 
   async function deleteRecette() {
-    if (!window.confirm(`Supprimer définitivement la recette "${selected.nom}" ?`)) return
+    const { data: utilisePar } = await supabase.from('recette_ingredients').select('id').eq('matiere_premiere_id', selected.matiere_premiere_id).limit(1)
+    if (utilisePar && utilisePar.length > 0) {
+      if (!window.confirm(`"${selected.nom}" est utilisée dans au moins une recette. La supprimer quand même ? Ces recettes perdront cet ingrédient (il repassera "en attente").`)) return
+    } else if (!window.confirm(`Supprimer définitivement la base "${selected.nom}" ?`)) {
+      return
+    }
+    if (selected.matiere_premiere_id) {
+      await supabase.from('recette_ingredients').update({ matiere_premiere_id: null, designation_brute: selected.nom }).eq('matiere_premiere_id', selected.matiere_premiere_id)
+    }
     await supabase.from('recettes').delete().eq('id', selected.id)
+    if (selected.matiere_premiere_id) {
+      await supabase.from('matieres_premieres').delete().eq('id', selected.matiere_premiere_id)
+    }
     setSelectedId(null)
     fetchAll()
   }
@@ -217,7 +230,7 @@ export default function Recettes() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">Recettes</h2>
+        <h2 className="text-2xl font-bold text-gray-800">Base et Appareils</h2>
         <div className="flex items-center gap-2">
           {nbEnAttente > 0 && (
             <button onClick={lancerRapprochement} disabled={rapprochementEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-200 bg-orange-50 disabled:opacity-50">
@@ -228,7 +241,7 @@ export default function Recettes() {
             <Upload size={16} /> Importer un fichier
           </button>
           <button onClick={() => setShowForm(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-            <Plus size={16} /> Nouvelle recette
+            <Plus size={16} /> Nouvelle base
           </button>
         </div>
       </div>
@@ -244,7 +257,7 @@ export default function Recettes() {
             boxShadow: familleActive === 'Toutes' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
           }}
         >
-          Toutes <span className="text-xs text-gray-400 ml-1">{recettes.length}</span>
+          Toutes <span className="text-xs text-gray-400 ml-1">{basesSeules.length}</span>
         </button>
         {familles.map(([famille, nb]) => (
           <button
@@ -412,7 +425,7 @@ export default function Recettes() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-gray-800">Nouvelle recette</h3>
+              <h3 className="text-lg font-bold text-gray-800">Nouvelle base ou appareil</h3>
               <button onClick={() => setShowForm(false)}><X size={20} className="text-gray-400" /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -423,6 +436,15 @@ export default function Recettes() {
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Famille</label>
                 <input placeholder="Pâtisserie, Snack..." className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.famille} onChange={(e) => setForm({ ...form, famille: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-500 mb-1 block">Unité de production</label>
+                <select className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" value={form.unite} onChange={(e) => setForm({ ...form, unite: e.target.value })}>
+                  <option value="g">g (poids)</option>
+                  <option value="ml">ml (volume)</option>
+                  <option value="piece">pièce (comptage)</option>
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">L'unité dans laquelle les autres recettes consommeront cette base.</p>
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-500 mb-1 block">Atelier</label>
@@ -442,7 +464,7 @@ export default function Recettes() {
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-gray-500">Annuler</button>
-              <button onClick={createRecette} className="px-6 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>Créer</button>
+              <button onClick={creerBaseHandler} className="px-6 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>Créer</button>
             </div>
           </div>
         </div>
