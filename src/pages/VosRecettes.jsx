@@ -179,7 +179,12 @@ export default function VosRecettes() {
     fetchAll()
   }
 
-  const nbEnAttente = ingredientsAll.filter((i) => !i.matiere_premiere_id && i.designation_brute).length
+  const idsFinales = useMemo(() => new Set(recettesFinales.map((r) => r.id)), [recettesFinales])
+  const idsElementsFinales = useMemo(() => new Set(elementsAll.filter((e) => idsFinales.has(e.recette_id)).map((e) => e.id)), [elementsAll, idsFinales])
+  const nbEnAttente = ingredientsAll.filter((i) =>
+    !i.matiere_premiere_id && i.designation_brute &&
+    (idsFinales.has(i.recette_id) || idsElementsFinales.has(i.element_id))
+  ).length
 
   async function lancerRapprochement() {
     setRapprochementEnCours(true)

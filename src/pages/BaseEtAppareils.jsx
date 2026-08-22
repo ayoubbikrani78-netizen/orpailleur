@@ -212,7 +212,12 @@ export default function BaseEtAppareils() {
     fetchAll()
   }
 
-  const nbEnAttente = ingredientsAll.filter((i) => !i.matiere_premiere_id && i.designation_brute).length
+  const idsBase = useMemo(() => new Set(basesSeules.map((r) => r.id)), [basesSeules])
+  const idsElementsBase = useMemo(() => new Set(elementsAll.filter((e) => idsBase.has(e.recette_id)).map((e) => e.id)), [elementsAll, idsBase])
+  const nbEnAttente = ingredientsAll.filter((i) =>
+    !i.matiere_premiere_id && i.designation_brute &&
+    (idsBase.has(i.recette_id) || idsElementsBase.has(i.element_id))
+  ).length
 
   async function lancerRapprochement() {
     setRapprochementEnCours(true)
