@@ -6,6 +6,7 @@ import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { CategoryPickerCompact } from '../components/CategoryPicker'
 import { trouverArticleCorrespondant, assignerCodeSiManquant } from '../lib/regroupement'
+import { trouverFournisseurCorrespondant } from '../lib/regroupementFournisseurs'
 
 const STATUT_CONFIG = {
   en_cours: { label: 'En cours de traitement', color: 'bg-blue-50 text-blue-500', icon: Loader },
@@ -104,11 +105,8 @@ export default function Factures() {
       let fournisseurId = null
 
       if (extracted.fournisseur?.nom) {
-        const { data: existing } = await supabase
-          .from('fournisseurs')
-          .select('*')
-          .ilike('nom', extracted.fournisseur.nom)
-          .maybeSingle()
+        const { data: fournisseursExistants } = await supabase.from('fournisseurs').select('*')
+        const existing = trouverFournisseurCorrespondant(extracted.fournisseur.nom, fournisseursExistants || [])
 
         if (existing) {
           fournisseurId = existing.id

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, ChevronRight, X } from 'lucide-react'
+import { detecterGroupesDoublons } from '../lib/regroupementFournisseurs'
+import FusionFournisseursModal from '../components/FusionFournisseursModal'
+import { Plus, ChevronRight, X, Merge } from 'lucide-react'
 
 const EMPTY_FORM = {
   nom: '', adresse: '', telephone: '', email: '',
@@ -14,6 +16,7 @@ export default function Fournisseurs() {
   const [fournisseurs, setFournisseurs] = useState([])
   const [selected, setSelected] = useState(null)
   const [showForm, setShowForm] = useState(false)
+  const [showFusion, setShowFusion] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [loading, setLoading] = useState(true)
 
@@ -117,13 +120,22 @@ async function deleteFournisseur() {
     setShowForm(true)
   }
 
+  const nbDoublons = useMemo(() => detecterGroupesDoublons(fournisseurs).reduce((s, g) => s + g.length, 0), [fournisseurs])
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Catalogue fournisseurs</h2>
-        <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
-          <Plus size={16} /> Ajouter
-        </button>
+        <div className="flex items-center gap-2">
+          {nbDoublons > 0 && (
+            <button onClick={() => setShowFusion(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-200 bg-orange-50">
+              <Merge size={16} /> {nbDoublons} doublon(s) détecté(s)
+            </button>
+          )}
+          <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-medium" style={{ backgroundColor: '#C9A84C' }}>
+            <Plus size={16} /> Ajouter
+          </button>
+        </div>
       </div>
 
       {loading ? <p className="text-gray-400">Chargement...</p> : (
@@ -252,6 +264,14 @@ async function deleteFournisseur() {
 </div>
           </div>
         </div>
+      )}
+
+      {showFusion && (
+        <FusionFournisseursModal
+          fournisseurs={fournisseurs}
+          onClose={() => setShowFusion(false)}
+          onDone={fetchFournisseurs}
+        />
       )}
     </div>
   )
