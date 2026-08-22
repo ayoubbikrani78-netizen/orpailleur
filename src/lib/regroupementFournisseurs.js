@@ -73,7 +73,7 @@ export function detecterGroupesDoublons(fournisseurs) {
   }
   const groupes = {}
   for (const f of fournisseurs) {
-    const racine = find(f.id)
+    const racine = find(f.id);
     (groupes[racine] ||= []).push(f)
   }
   return Object.values(groupes).filter((g) => g.length > 1)
