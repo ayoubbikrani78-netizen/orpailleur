@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
+import { recalculerCmup, convertirPrixUnitaireVersBase } from '../lib/cmup'
 import { ChevronRight, X, AlertTriangle, Check, Upload, Loader } from 'lucide-react'
 import { extractInvoiceData, fileToBase64 } from '../lib/ocr'
 
@@ -172,7 +172,7 @@ async function openDetail(commande) {
         const quantiteEnUnite = (ligne.quantite_receptionnee || 0) * conditionnement
         const prixUnitaireLigne = parseFloat(ligne.prix_unitaire_ht) || 0
         const uniteAchat = ligne.matieres_premieres_fournisseurs.unite
-        const prixGUML = calculerPrixBase(prixUnitaireLigne, conditionnement, uniteAchat)
+        const prixGUML = convertirPrixUnitaireVersBase(prixUnitaireLigne, uniteAchat)
 
         const { data: mp } = await supabase.from('matieres_premieres').select('quantite_stock').eq('id', mpId).single()
         const nouveauStock = (mp?.quantite_stock || 0) + quantiteEnUnite

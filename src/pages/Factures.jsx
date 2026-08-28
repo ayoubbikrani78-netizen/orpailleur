@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Upload, FileText, Eye, X, Check, AlertCircle, Loader } from 'lucide-react'
 import { extractInvoiceData } from '../lib/ocr'
-import { recalculerCmup, calculerPrixBase } from '../lib/cmup'
+import { recalculerCmup, calculerPrixBase, quantiteEnUniteBase, calculerPrixBaseDepuisTotal } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { CategoryPickerCompact } from '../components/CategoryPicker'
 import { trouverArticleCorrespondant, assignerCodeSiManquant } from '../lib/regroupement'
@@ -279,7 +279,9 @@ export default function Factures() {
 
       const prixUnitaire = parseFloat(ligne.prix_unitaire_ht) || 0
       const conditionnement = parseFloat(ligne.conditionnement) || 1
-      const prixGUML = calculerPrixBase(prixUnitaire, conditionnement, ligne.unite)
+      const montantLigne = parseFloat(ligne.montant_ht) || 0
+      const quantiteLigne = parseFloat(ligne.quantite) || 0
+      const prixGUML = calculerPrixBase(montantLigne, quantiteLigne, conditionnement, ligne.unite)
 
       if (lienExistant) {
         // Une fois un article créé, on ne réécrit jamais silencieusement son conditionnement/unité
@@ -460,18 +462,23 @@ export default function Factures() {
 
       if (lien) {
         // Une même matière première peut apparaître sur plusieurs lignes de facture (ex: plusieurs
-        // pièces d'un produit vendu au poids, pesées séparément) : on additionne les quantités
-        // plutôt que d'écraser, pour ne pas perdre de marchandise et afficher une seule ligne.
-        const quantiteAjoutee = Math.round((parseFloat(ligne.quantite) || 0) * (lien.conditionnement || 1) * 100) / 100
-        const estNouveau = (nouveaux || []).includes(ligne.designation)
-        const prixUnitaireLigne = parseFloat(ligne.prix_unitaire_ht) || 0
+        // pièces d'un produit vendu au poids, pesées séparément, ou plusieurs livraisons groupées sur
+        // une même facture) : on additionne les quantités ET les montants plutôt que d'écraser, pour
+        // que le prix retenu soit une vraie moyenne pondérée de toutes les lignes, pas juste la première.
         const conditionnementLigne = parseFloat(ligne.conditionnement) || lien.conditionnement || 1
-        const prixGUML = calculerPrixBase(prixUnitaireLigne, conditionnementLigne, ligne.unite)
+        const quantiteAjoutee = Math.round((parseFloat(ligne.quantite) || 0) * conditionnementLigne * 100) / 100
+        const estNouveau = (nouveaux || []).includes(ligne.designation)
+        const montantLigne = parseFloat(ligne.montant_ht) || 0
+        const quantiteBaseLigne = quantiteEnUniteBase(parseFloat(ligne.quantite) || 0, conditionnementLigne, ligne.unite)
         if (parMatierePremiere.has(lien.matiere_premiere_id)) {
           const existant = parMatierePremiere.get(lien.matiere_premiere_id)
           existant.quantiteEnUnite = Math.round((existant.quantiteEnUnite + quantiteAjoutee) * 100) / 100
           existant.quantiteBrute = (existant.quantiteBrute || 0) + (parseFloat(ligne.quantite) || 0)
+          existant.montantTotal = (existant.montantTotal || 0) + montantLigne
+          existant.quantiteBaseTotal = (existant.quantiteBaseTotal || 0) + quantiteBaseLigne
+          existant.prixGUML = calculerPrixBaseDepuisTotal(existant.montantTotal, existant.quantiteBaseTotal)
         } else {
+          const quantiteBaseTotal = quantiteBaseLigne
           parMatierePremiere.set(lien.matiere_premiere_id, {
             matiere_premiere_fournisseur_id: lien.id,
             matiere_premiere_id: lien.matiere_premiere_id,
@@ -481,7 +488,9 @@ export default function Factures() {
             conditionnement: lien.conditionnement || 1,
             quantiteEnUnite: quantiteAjoutee,
             quantiteBrute: parseFloat(ligne.quantite) || 0,
-            prixGUML,
+            montantTotal: montantLigne,
+            quantiteBaseTotal,
+            prixGUML: calculerPrixBaseDepuisTotal(montantLigne, quantiteBaseTotal),
             univers: categories.some((c) => c.univers === ligne.univers_suggere) ? ligne.univers_suggere : '',
             famille: categories.some((c) => c.univers === ligne.univers_suggere && c.famille === ligne.famille_suggere) ? ligne.famille_suggere : '',
             estNouveau
