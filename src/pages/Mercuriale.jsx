@@ -503,9 +503,8 @@ function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectio
                 <p className="text-xs text-gray-400">{l.designation_fournisseur} — Réf {l.reference_fournisseur}</p>
               </div>
               <div className="text-right">
-                <p className="font-medium text-gray-700">{l.prix_actuel}€/{mp.unite}</p>
+                <p className="font-medium text-gray-700">{(l.prix_actuel * l.conditionnement).toFixed(2)}€/{l.conditionnement}{mp.unite}</p>
                 <p className="text-xs text-gray-400">
-                  {l.conditionnement > 1 ? `carton de ${l.conditionnement} · ` : ''}
                   {l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(6)}€/${mp.unite === 'kg' || mp.unite === 'L' ? (mp.unite === 'kg' ? 'g' : 'ml') : mp.unite || 'u'}` : ''}
                 </p>
               </div>
