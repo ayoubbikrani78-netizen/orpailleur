@@ -62,7 +62,9 @@ export default function CoutRevient() {
     return { matieresById, recettesParMpId, elementsParRecetteId, ingredientsParElementId, ingredientsDirectsParRecetteId, tauxHoraireParAtelier, ateliersById, bareme, perteDefaut: reglages.perte_defaut }
   }, [matieres, recettes, elementsAll, ingredientsAll, ateliers, bareme, reglages])
 
-  const lignes = useMemo(() => recettes.map((r) => {
+  // Uniquement les recettes finales (produits vendus) — les Bases et Appareils
+  // ont leur propre page, ils n'ont pas de "coût de revient" au sens de la vente.
+  const lignes = useMemo(() => recettes.filter((r) => !r.est_composant).map((r) => {
     const elements = (ctx.elementsParRecetteId[r.id] || []).map((el) => ({
       ...el,
       ingredients: (ctx.ingredientsParElementId[el.id] || []).map((ing) => {
@@ -107,7 +109,6 @@ export default function CoutRevient() {
 
   const nbOk = lignes.filter((l) => l.statut.code === 'ok').length
   const nbAlerte = lignes.filter((l) => l.statut.code === 'alerte').length
-  const nbComposant = lignes.filter((l) => l.statut.code === 'composant').length
   const ligneDetail = lignes.find((l) => l.r.id === detailId)
 
   return (
@@ -116,11 +117,10 @@ export default function CoutRevient() {
         <h2 className="text-2xl font-bold text-gray-800">Coût de revient</h2>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <StatCard label="Produits" value={recettes.length} />
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <StatCard label="Produits" value={lignes.length} />
         <StatCard label="OK" value={nbOk} color="text-green-600" />
         <StatCard label="En alerte" value={nbAlerte} color="text-orange-500" />
-        <StatCard label="Composants" value={nbComposant} color="text-gray-500" />
       </div>
 
       <div className="flex gap-1 p-1 rounded-lg bg-gray-100 mb-4 overflow-x-auto">
