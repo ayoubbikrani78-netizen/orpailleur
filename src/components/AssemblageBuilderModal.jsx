@@ -68,7 +68,9 @@ export default function AssemblageBuilderModal({ ateliers, onClose, onCreated })
 
   // Uniquement les catégories des recettes finales (Pâtisserie, Snack...), jamais celles
   // des Bases et Appareils (Biscuit, Ganache...) qui ne sont pas des catégories de produit vendu.
-  const familles = useMemo(() => [...new Set(recettes.filter((r) => !r.est_composant).map((r) => r.famille).filter(Boolean))].sort(), [recettes])
+  // Liste fixe des catégories de produits vendus (pas dérivée des données, pour rester stable
+  // quoi qu'il arrive en base). "+ Nouvelle catégorie" reste disponible en dessous si besoin.
+  const familles = ['Pâtisserie', 'Snack', 'Viennoiserie', 'Pain', 'Boisson', 'Pizza']
 
   const basesFiltrees = bases.filter((b) => b.nom.toLowerCase().includes(query.toLowerCase()))
 
@@ -171,7 +173,7 @@ export default function AssemblageBuilderModal({ ateliers, onClose, onCreated })
                   className="border border-gray-200 rounded-xl px-4 py-6 text-center hover:border-yellow-400 hover:bg-yellow-50 transition-colors"
                 >
                   <span className="font-medium text-gray-700">{f}</span>
-                  <p className="text-xs text-gray-400 mt-1">{bases.length} base(s) et appareil(s) au total</p>
+                  <p className="text-xs text-gray-400 mt-1">{recettes.filter((r) => !r.est_composant && r.famille === f).length} recette(s) existante(s)</p>
                 </button>
               ))}
             </div>
