@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { rattraperCmupHistorique, corrigerBugConditionnement } from '../lib/cmup'
+import { rattraperCmupHistorique } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { assignerCodeSiManquant } from '../lib/regroupement'
 import CategoryPicker from '../components/CategoryPicker'
@@ -25,7 +25,6 @@ export default function Mercuriale() {
   const [mouvements, setMouvements] = useState([])
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
-  const [correctifEnCours, setCorrectifEnCours] = useState(false)
   const [rattrapageCodesEnCours, setRattrapageCodesEnCours] = useState(false)
   const [showSuggestionCategories, setShowSuggestionCategories] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
@@ -44,23 +43,6 @@ export default function Mercuriale() {
       fetchAll()
     } finally {
       setRattrapageEnCours(false)
-    }
-  }
-
-  async function lancerCorrectifConditionnement() {
-    if (!window.confirm("Corriger tous les prix historiques (bug de division en trop par le conditionnement) ? Cette action ne peut être lancée qu'une seule fois.")) return
-    setCorrectifEnCours(true)
-    setRattrapageMessage('')
-    try {
-      const resultat = await corrigerBugConditionnement()
-      if (resultat.dejaFait) {
-        setRattrapageMessage(`Déjà corrigé le ${new Date(resultat.corrigeLe).toLocaleString('fr-FR')}.`)
-      } else {
-        setRattrapageMessage(`Correction appliquée : ${resultat.liensCorriges} lien(s) fournisseur et ${resultat.mouvementsCorriges} mouvement(s) corrigés, CMUP recalculé pour ${resultat.matieresRecalculees} matière(s).`)
-      }
-      fetchAll()
-    } finally {
-      setCorrectifEnCours(false)
     }
   }
 
@@ -271,9 +253,6 @@ async function deleteMatierePremiere() {
           )}
           <button onClick={lancerRattrapageCmup} disabled={rattrapageEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
             <RefreshCw size={16} className={rattrapageEnCours ? 'animate-spin' : ''} /> {rattrapageEnCours ? 'Recalcul...' : 'Recalculer les CMUP'}
-          </button>
-          <button onClick={lancerCorrectifConditionnement} disabled={correctifEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-red-600 border border-red-200 bg-red-50 disabled:opacity-50">
-            <RefreshCw size={16} className={correctifEnCours ? 'animate-spin' : ''} /> {correctifEnCours ? 'Correction...' : 'Corriger le bug prix (28/08)'}
           </button>
           {nbCodesManquants > 0 && (
             <button onClick={lancerRattrapageCodes} disabled={rattrapageCodesEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-gray-600 border border-gray-200 disabled:opacity-50">
