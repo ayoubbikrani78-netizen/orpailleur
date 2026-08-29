@@ -119,6 +119,60 @@ export async function rattraperCmupHistorique() {
 }
 
 /**
+ * Rattrapage global et EXACT : relit toutes les factures déjà importées (le JSON complet de
+ * chaque ligne est conservé dans factures.lignes_extraites) et recalcule, pour chaque article,
+ * le vrai prix pondéré sur l'ensemble de son historique d'achat — à partir du montant et de la
+ * quantité réelle de chaque ligne, jamais du "prix unitaire" imprimé (peu fiable, cf. plus haut).
+ * Contrairement à corrigerBugConditionnement (approximatif, à lancer une fois), celui-ci est exact
+ * et peut être relancé autant de fois que nécessaire sans risque : il repart toujours des factures
+ * sources, jamais de valeurs déjà (peut-être mal) corrigées.
+ */
+export async function rattraperPrixDepuisFactures() {
+  const { data: factures } = await supabase.from('factures').select('id, fournisseur_id, lignes_extraites').not('lignes_extraites', 'is', null)
+  const { data: liens } = await supabase.from('matieres_premieres_fournisseurs').select('id, matiere_premiere_id, fournisseur_id, designation_fournisseur, unite')
+
+  const liensParCle = {}
+  for (const lien of liens || []) {
+    const cle = `${lien.fournisseur_id}::${(lien.designation_fournisseur || '').trim().toLowerCase()}`
+    liensParCle[cle] = lien
+  }
+
+  const accum = {}
+  for (const facture of factures || []) {
+    if (!facture.fournisseur_id) continue
+    let lignes = []
+    try { lignes = JSON.parse(facture.lignes_extraites) } catch { continue }
+    for (const ligne of lignes) {
+      if (!ligne.designation) continue
+      const cle = `${facture.fournisseur_id}::${ligne.designation.trim().toLowerCase()}`
+      const lien = liensParCle[cle]
+      if (!lien) continue
+      const montant = parseFloat(ligne.montant_ht) || 0
+      const quantite = parseFloat(ligne.quantite) || 0
+      const conditionnement = parseFloat(ligne.conditionnement) || 1
+      const quantiteBase = quantiteEnUniteBase(quantite, conditionnement, ligne.unite)
+      if (!quantiteBase) continue
+      accum[lien.matiere_premiere_id] ||= { montantTotal: 0, quantiteBaseTotal: 0, unite: lien.unite, lienId: lien.id }
+      accum[lien.matiere_premiere_id].montantTotal += montant
+      accum[lien.matiere_premiere_id].quantiteBaseTotal += quantiteBase
+    }
+  }
+
+  let articlesCorriges = 0
+  for (const [matiereId, acc] of Object.entries(accum)) {
+    if (!acc.quantiteBaseTotal) continue
+    const prixGUML = calculerPrixBaseDepuisTotal(acc.montantTotal, acc.quantiteBaseTotal)
+    const prixActuel = prixBaseVersUnite(prixGUML, acc.unite)
+    await supabase.from('matieres_premieres_fournisseurs').update({ prix_g_u_ml: prixGUML, prix_actuel: prixActuel }).eq('id', acc.lienId)
+    await supabase.from('mouvements_stock').update({ prix_g_u_ml: prixGUML }).eq('matiere_premiere_id', matiereId).eq('type', 'reception')
+    await recalculerCmup(matiereId)
+    articlesCorriges++
+  }
+
+  return { articlesCorriges, facturesAnalysees: (factures || []).length }
+}
+
+/**
  * Correctif rétroactif d'un bug découvert le 28/08 : la fonction de calcul du prix
  * au gramme divisait le "prix unitaire" facture par le conditionnement une fois de
  * trop (elle le traitait comme un prix au carton, alors qu'il est déjà au kilo/litre

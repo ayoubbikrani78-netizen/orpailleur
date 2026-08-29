@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { rattraperCmupHistorique, recalculerCmup, convertirPrixUnitaireVersBase } from '../lib/cmup'
+import { rattraperCmupHistorique, recalculerCmup, convertirPrixUnitaireVersBase, rattraperPrixDepuisFactures } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { assignerCodeSiManquant } from '../lib/regroupement'
 import CategoryPicker from '../components/CategoryPicker'
@@ -25,6 +25,7 @@ export default function Mercuriale() {
   const [mouvements, setMouvements] = useState([])
   const [correctionStock, setCorrectionStock] = useState({ quantite: '', raison: '' })
   const [rattrapageEnCours, setRattrapageEnCours] = useState(false)
+  const [rattrapagePrixEnCours, setRattrapagePrixEnCours] = useState(false)
   const [rattrapageCodesEnCours, setRattrapageCodesEnCours] = useState(false)
   const [showSuggestionCategories, setShowSuggestionCategories] = useState(false)
   const [rattrapageMessage, setRattrapageMessage] = useState('')
@@ -43,6 +44,18 @@ export default function Mercuriale() {
       fetchAll()
     } finally {
       setRattrapageEnCours(false)
+    }
+  }
+
+  async function lancerRattrapagePrixFactures() {
+    setRattrapagePrixEnCours(true)
+    setRattrapageMessage('')
+    try {
+      const { articlesCorriges, facturesAnalysees } = await rattraperPrixDepuisFactures()
+      setRattrapageMessage(`${facturesAnalysees} facture(s) relue(s), prix recalculé pour ${articlesCorriges} article(s).`)
+      fetchAll()
+    } finally {
+      setRattrapagePrixEnCours(false)
     }
   }
 
@@ -263,6 +276,9 @@ async function deleteMatierePremiere() {
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold text-gray-800">Mercuriale</h2>
         <div className="flex items-center gap-2">
+          <button onClick={lancerRattrapagePrixFactures} disabled={rattrapagePrixEnCours} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50" style={{ backgroundColor: '#C9A84C' }}>
+            <RefreshCw size={16} className={rattrapagePrixEnCours ? 'animate-spin' : ''} /> {rattrapagePrixEnCours ? 'Rattrapage...' : 'Rattraper tous les prix'}
+          </button>
           {nbNonCategorises > 0 && (
             <button onClick={() => setShowSuggestionCategories(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-orange-600 border border-orange-200 bg-orange-50">
               <Sparkles size={16} /> Suggérer les catégories ({nbNonCategorises})
