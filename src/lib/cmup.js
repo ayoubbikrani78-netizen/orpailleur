@@ -138,6 +138,7 @@ export async function rattraperPrixDepuisFactures() {
   }
 
   const accum = {}
+  let lignesIgnorees = 0
   for (const facture of factures || []) {
     if (!facture.fournisseur_id) continue
     let lignes = []
@@ -147,6 +148,16 @@ export async function rattraperPrixDepuisFactures() {
       const cle = `${facture.fournisseur_id}::${ligne.designation.trim().toLowerCase()}`
       const lien = liensParCle[cle]
       if (!lien) continue
+      // Deux lectures de facture peuvent désigner le même produit avec des unités différentes
+      // (ex: "24 pièces" une fois, "0.5L" une autre fois pour la même bouteille — erreur de lecture
+      // IA sur l'une des deux). Les mélanger fausserait complètement le calcul : on ignore toute ligne
+      // dont l'unité ne correspond pas à celle déjà enregistrée pour l'article, plutôt que de deviner.
+      const uniteLigne = (ligne.unite || '').toLowerCase().trim()
+      const uniteArticle = (lien.unite || '').toLowerCase().trim()
+      if (uniteLigne !== uniteArticle) {
+        lignesIgnorees++
+        continue
+      }
       const montant = parseFloat(ligne.montant_ht) || 0
       const quantite = parseFloat(ligne.quantite) || 0
       const conditionnement = parseFloat(ligne.conditionnement) || 1
@@ -169,7 +180,7 @@ export async function rattraperPrixDepuisFactures() {
     articlesCorriges++
   }
 
-  return { articlesCorriges, facturesAnalysees: (factures || []).length }
+  return { articlesCorriges, facturesAnalysees: (factures || []).length, lignesIgnorees }
 }
 
 /**

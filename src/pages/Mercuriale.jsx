@@ -51,8 +51,11 @@ export default function Mercuriale() {
     setRattrapagePrixEnCours(true)
     setRattrapageMessage('')
     try {
-      const { articlesCorriges, facturesAnalysees } = await rattraperPrixDepuisFactures()
-      setRattrapageMessage(`${facturesAnalysees} facture(s) relue(s), prix recalculé pour ${articlesCorriges} article(s).`)
+      const { articlesCorriges, facturesAnalysees, lignesIgnorees } = await rattraperPrixDepuisFactures()
+      setRattrapageMessage(
+        `${facturesAnalysees} facture(s) relue(s), prix recalculé pour ${articlesCorriges} article(s).`
+        + (lignesIgnorees > 0 ? ` ${lignesIgnorees} ligne(s) ignorée(s) car l'unité lue ne correspondait pas à celle de l'article (à vérifier à la main).` : '')
+      )
       fetchAll()
     } finally {
       setRattrapagePrixEnCours(false)
