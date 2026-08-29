@@ -35,6 +35,14 @@ export function calculerPrixBase(montant, quantite, conditionnement, unite) {
   return calculerPrixBaseDepuisTotal(montant, quantiteEnUniteBase(quantite, conditionnement, unite))
 }
 
+/** Prix au gramme/ml ramené à l'unité déclarée de l'article (€/kg, €/L...), pour l'affichage
+ *  et le stockage de prix_actuel — toujours dérivé du prix au gramme fiable, jamais du "prix
+ *  unitaire" imprimé sur facture (dont la convention est trop peu fiable pour être stockée telle quelle). */
+export function prixBaseVersUnite(prixParGramme, unite) {
+  const u = (unite || '').toLowerCase().trim()
+  return (u === 'kg' || u === 'l') ? (Number(prixParGramme) || 0) * 1000 : (Number(prixParGramme) || 0)
+}
+
 /** Prix unitaire (tel qu'imprimé sur facture, déjà par kg/L/pièce) ramené à l'unité de base. */
 export function convertirPrixUnitaireVersBase(prixUnitaire, unite) {
   const u = (unite || '').toLowerCase().trim()

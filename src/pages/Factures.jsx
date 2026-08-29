@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { Upload, FileText, Eye, X, Check, AlertCircle, Loader } from 'lucide-react'
 import { extractInvoiceData } from '../lib/ocr'
-import { recalculerCmup, calculerPrixBase, quantiteEnUniteBase, calculerPrixBaseDepuisTotal } from '../lib/cmup'
+import { recalculerCmup, calculerPrixBase, quantiteEnUniteBase, calculerPrixBaseDepuisTotal, prixBaseVersUnite } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { CategoryPickerCompact } from '../components/CategoryPicker'
 import { trouverArticleCorrespondant, assignerCodeSiManquant } from '../lib/regroupement'
@@ -277,11 +277,15 @@ export default function Factures() {
         continue
       }
 
-      const prixUnitaire = parseFloat(ligne.prix_unitaire_ht) || 0
       const conditionnement = parseFloat(ligne.conditionnement) || 1
       const montantLigne = parseFloat(ligne.montant_ht) || 0
       const quantiteLigne = parseFloat(ligne.quantite) || 0
       const prixGUML = calculerPrixBase(montantLigne, quantiteLigne, conditionnement, ligne.unite)
+      // Le "prix unitaire" imprimé sur facture n'a pas une convention fiable (parfois au kilo,
+      // parfois à la pièce/barquette, selon le produit — même au sein d'une même facture). On ne
+      // s'y fie donc jamais pour stocker un prix : on reconstruit le prix par unité déclarée de
+      // l'article (prix_actuel, en €/kg ou €/L par ex.) à partir du prix au gramme déjà fiable.
+      const prixParUnite = prixBaseVersUnite(prixGUML, ligne.unite)
 
       if (lienExistant) {
         // Une fois un article créé, on ne réécrit jamais silencieusement son conditionnement/unité
@@ -299,10 +303,10 @@ export default function Factures() {
           })
         }
 
-        if (Math.abs((lienExistant.prix_actuel || 0) - prixUnitaire) > 0.01) {
+        if (Math.abs((lienExistant.prix_actuel || 0) - prixParUnite) > 0.01) {
           const { error: errUpdate } = await supabase.from('matieres_premieres_fournisseurs').update({
-            nouveau_prix: prixUnitaire,
-            prix_actuel: prixUnitaire,
+            nouveau_prix: prixParUnite,
+            prix_actuel: prixParUnite,
             prix_g_u_ml: prixGUML
           }).eq('id', lienExistant.id)
 
@@ -314,7 +318,7 @@ export default function Factures() {
 
           await supabase.from('alertes').insert({
             type: 'ecart_prix',
-            message: `Changement de prix détecté pour ${ligne.designation} : ${lienExistant.prix_actuel}€ → ${prixUnitaire}€`,
+            message: `Changement de prix détecté pour ${ligne.designation} : ${lienExistant.prix_actuel}€ → ${prixParUnite.toFixed(4)}€`,
             reference_id: lienExistant.matiere_premiere_id,
             reference_table: 'matieres_premieres'
           })
@@ -332,8 +336,8 @@ export default function Factures() {
             designation_fournisseur: ligne.designation,
             conditionnement: conditionnement,
             unite: ligne.unite,
-            prix_actuel: prixUnitaire,
-            prix_initial: prixUnitaire,
+            prix_actuel: prixParUnite,
+            prix_initial: prixParUnite,
             prix_g_u_ml: prixGUML
           })
 
@@ -372,8 +376,8 @@ export default function Factures() {
           designation_fournisseur: ligne.designation,
           conditionnement: conditionnement,
           unite: ligne.unite,
-          prix_actuel: prixUnitaire,
-          prix_initial: prixUnitaire,
+          prix_actuel: prixParUnite,
+          prix_initial: prixParUnite,
           prix_g_u_ml: prixGUML
         })
 
