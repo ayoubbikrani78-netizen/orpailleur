@@ -113,7 +113,7 @@ export default function Mercuriale() {
     setSelected(mp)
     const { data: l } = await supabase
       .from('matieres_premieres_fournisseurs')
-      .select('*, fournisseurs(nom)')
+      .select('*, fournisseurs(nom), factures:derniere_facture_id(numero, date_facture)')
       .eq('matiere_premiere_id', mp.id)
     setLiens(l || [])
     const { data: m } = await supabase
@@ -570,6 +570,11 @@ function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectio
               <div>
                 <p className="font-medium text-gray-700">{l.fournisseurs?.nom}</p>
                 <p className="text-xs text-gray-400">{l.designation_fournisseur} — Réf {l.reference_fournisseur}</p>
+                {l.factures?.numero && (
+                  <p className="text-[11px] text-gray-400">
+                    Facture n° {l.factures.numero}{l.factures.date_facture ? ` du ${new Date(l.factures.date_facture).toLocaleDateString('fr-FR')}` : ''}
+                  </p>
+                )}
               </div>
               {editingLienId === l.id ? (
                 <div className="flex items-center gap-2">

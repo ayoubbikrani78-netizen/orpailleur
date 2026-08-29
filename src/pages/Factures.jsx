@@ -321,6 +321,11 @@ export default function Factures() {
           })
         }
 
+        // La "dernière facture" doit toujours être mise à jour, que le prix ait changé ou non —
+        // c'est une trace de "quand a-t-on vu ce produit chez ce fournisseur pour la dernière fois",
+        // utile pour retrouver rapidement la facture source d'un prix affiché en Mercuriale.
+        await supabase.from('matieres_premieres_fournisseurs').update({ derniere_facture_id: factureId }).eq('id', lienExistant.id)
+
         if (Math.abs((lienExistant.prix_actuel || 0) - prixParUnite) > 0.01) {
           const { error: errUpdate } = await supabase.from('matieres_premieres_fournisseurs').update({
             nouveau_prix: prixParUnite,
@@ -356,7 +361,8 @@ export default function Factures() {
             unite: ligne.unite,
             prix_actuel: prixParUnite,
             prix_initial: prixParUnite,
-            prix_g_u_ml: prixGUML
+            prix_g_u_ml: prixGUML,
+            derniere_facture_id: factureId
           })
 
           if (errInsertLien) {
@@ -396,7 +402,8 @@ export default function Factures() {
           unite: ligne.unite,
           prix_actuel: prixParUnite,
           prix_initial: prixParUnite,
-          prix_g_u_ml: prixGUML
+          prix_g_u_ml: prixGUML,
+          derniere_facture_id: factureId
         })
 
         if (errInsertLien) {
