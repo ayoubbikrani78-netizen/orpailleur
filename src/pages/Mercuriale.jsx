@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { rattraperCmupHistorique } from '../lib/cmup'
+import { rattraperCmupHistorique, recalculerCmup, convertirPrixUnitaireVersBase } from '../lib/cmup'
 import { reconcilierIngredientsEnAttente } from '../lib/importRecette'
 import { assignerCodeSiManquant } from '../lib/regroupement'
 import CategoryPicker from '../components/CategoryPicker'
@@ -138,6 +138,20 @@ export default function Mercuriale() {
     await supabase.from('matieres_premieres').update({ univers: univers || null, famille: famille || null }).eq('id', selected.id)
     if (univers) await assignerCodeSiManquant(selected.id, univers)
     setSelected({ ...selected, univers, famille })
+    fetchAll()
+  }
+
+  async function updateLienFournisseur(lienId, { prixTotalCarton, conditionnement, unite }) {
+    const conditionnementNb = parseFloat(conditionnement) || 1
+    const prixActuel = conditionnementNb ? parseFloat(prixTotalCarton) / conditionnementNb : 0
+    const prixGUML = convertirPrixUnitaireVersBase(prixActuel, unite)
+    await supabase.from('matieres_premieres_fournisseurs').update({
+      conditionnement: conditionnementNb,
+      prix_actuel: prixActuel,
+      prix_g_u_ml: prixGUML
+    }).eq('id', lienId)
+    await recalculerCmup(selected.id)
+    await openDetail(selected)
     fetchAll()
   }
 
@@ -436,6 +450,7 @@ async function deleteMatierePremiere() {
           onClose={() => setShowDetail(false)}
           onSaveCorrection={saveCorrectionStock}
           onUpdateCategorie={updateCategorie}
+          onUpdateLienFournisseur={updateLienFournisseur}
           onDelete={deleteMatierePremiere}
           getCouvertureColor={getCouvertureColor}
         />
@@ -454,7 +469,20 @@ async function deleteMatierePremiere() {
 }
 
 
-function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectionStock, onClose, onSaveCorrection, categories, onUpdateCategorie, onDelete, getCouvertureColor }) {
+function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectionStock, onClose, onSaveCorrection, categories, onUpdateCategorie, onUpdateLienFournisseur, onDelete, getCouvertureColor }) {
+  const [editingLienId, setEditingLienId] = useState(null)
+  const [editForm, setEditForm] = useState({ prixTotalCarton: '', conditionnement: '' })
+
+  function commencerEdition(l) {
+    setEditingLienId(l.id)
+    setEditForm({ prixTotalCarton: (l.prix_actuel * l.conditionnement).toFixed(2), conditionnement: l.conditionnement })
+  }
+
+  async function validerEdition(l) {
+    await onUpdateLienFournisseur(l.id, { prixTotalCarton: editForm.prixTotalCarton, conditionnement: editForm.conditionnement, unite: mp.unite })
+    setEditingLienId(null)
+  }
+
   const cov = getCouvertureColor(mp.couverture_stock || 0, mp.seuil_rouge || 3, mp.seuil_orange || 7)
 
   return (
@@ -492,8 +520,12 @@ function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectio
           </div>
         </div>
 
-        {/* Fournisseurs liés — lecture seule, la liaison se fait automatiquement à l'import des factures */}
-        <h4 className="text-sm font-semibold text-gray-700 mb-3">Fournisseurs</h4>
+        {/* Fournisseurs liés — se remplissent automatiquement à l'import des factures ;
+            prix et conditionnement restent modifiables à la main (clic sur le prix) en cas d'erreur de lecture. */}
+        <div className="flex items-baseline justify-between mb-3">
+          <h4 className="text-sm font-semibold text-gray-700">Fournisseurs</h4>
+          {liens.length > 0 && <span className="text-[11px] text-gray-400">clique sur un prix pour le corriger</span>}
+        </div>
         <div className="space-y-2 mb-6">
           {liens.length === 0 && <p className="text-sm text-gray-400">Aucun fournisseur lié pour l'instant — se remplit automatiquement à l'import d'une facture.</p>}
           {liens.map(l => (
@@ -502,12 +534,33 @@ function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectio
                 <p className="font-medium text-gray-700">{l.fournisseurs?.nom}</p>
                 <p className="text-xs text-gray-400">{l.designation_fournisseur} — Réf {l.reference_fournisseur}</p>
               </div>
-              <div className="text-right">
-                <p className="font-medium text-gray-700">{(l.prix_actuel * l.conditionnement).toFixed(2)}€/{l.conditionnement}{mp.unite}</p>
-                <p className="text-xs text-gray-400">
-                  {l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(6)}€/${mp.unite === 'kg' || mp.unite === 'L' ? (mp.unite === 'kg' ? 'g' : 'ml') : mp.unite || 'u'}` : ''}
-                </p>
-              </div>
+              {editingLienId === l.id ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number" step="0.01" placeholder="Prix total carton"
+                    className="w-24 border border-gray-200 rounded px-2 py-1 text-xs text-right"
+                    value={editForm.prixTotalCarton}
+                    onChange={(e) => setEditForm({ ...editForm, prixTotalCarton: e.target.value })}
+                  />
+                  <span className="text-xs text-gray-400">€ /</span>
+                  <input
+                    type="number" step="0.01" placeholder="Conditionnement"
+                    className="w-16 border border-gray-200 rounded px-2 py-1 text-xs text-right"
+                    value={editForm.conditionnement}
+                    onChange={(e) => setEditForm({ ...editForm, conditionnement: e.target.value })}
+                  />
+                  <span className="text-xs text-gray-400">{mp.unite}</span>
+                  <button onClick={() => validerEdition(l)} className="text-xs font-medium text-white px-2 py-1 rounded" style={{ backgroundColor: '#C9A84C' }}>OK</button>
+                  <button onClick={() => setEditingLienId(null)} className="text-xs text-gray-400 px-1">Annuler</button>
+                </div>
+              ) : (
+                <div className="text-right cursor-pointer" onClick={() => commencerEdition(l)}>
+                  <p className="font-medium text-gray-700 hover:underline">{(l.prix_actuel * l.conditionnement).toFixed(2)}€/{l.conditionnement}{mp.unite}</p>
+                  <p className="text-xs text-gray-400">
+                    {l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(6)}€/${mp.unite === 'kg' || mp.unite === 'L' ? (mp.unite === 'kg' ? 'g' : 'ml') : mp.unite || 'u'}` : ''}
+                  </p>
+                </div>
+              )}
             </div>
           ))}
         </div>
