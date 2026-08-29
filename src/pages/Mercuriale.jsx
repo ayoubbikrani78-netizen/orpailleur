@@ -150,6 +150,9 @@ export default function Mercuriale() {
       prix_actuel: prixActuel,
       prix_g_u_ml: prixGUML
     }).eq('id', lienId)
+    // Le CMUP se recalcule à partir des mouvements de stock déjà enregistrés, pas du lien
+    // fournisseur lui-même : sans ça, corriger le prix ici n'aurait aucun effet sur le CMUP.
+    await supabase.from('mouvements_stock').update({ prix_g_u_ml: prixGUML }).eq('matiere_premiere_id', selected.id)
     await recalculerCmup(selected.id)
     await openDetail(selected)
     fetchAll()
@@ -469,6 +472,21 @@ async function deleteMatierePremiere() {
 }
 
 
+/** Affiche un conditionnement dans son unité la plus naturelle : grammes/ml en dessous
+ *  de 1 kg/L (ex: "125gr" plutôt que "0.125kg"), sinon en kg/L. */
+function formaterConditionnement(conditionnement, unite) {
+  const u = (unite || '').toLowerCase().trim()
+  if (u === 'kg') {
+    const grammes = conditionnement * 1000
+    return grammes < 1000 ? `${Math.round(grammes)}gr` : `${conditionnement}kg`
+  }
+  if (u === 'l') {
+    const ml = conditionnement * 1000
+    return ml < 1000 ? `${Math.round(ml)}ml` : `${conditionnement}L`
+  }
+  return `${conditionnement}${unite}`
+}
+
 function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectionStock, onClose, onSaveCorrection, categories, onUpdateCategorie, onUpdateLienFournisseur, onDelete, getCouvertureColor }) {
   const [editingLienId, setEditingLienId] = useState(null)
   const [editForm, setEditForm] = useState({ prixTotalCarton: '', conditionnement: '' })
@@ -555,7 +573,7 @@ function MercurialeDetail({ mp, liens, mouvements, correctionStock, setCorrectio
                 </div>
               ) : (
                 <div className="text-right cursor-pointer" onClick={() => commencerEdition(l)}>
-                  <p className="font-medium text-gray-700 hover:underline">{(l.prix_actuel * l.conditionnement).toFixed(2)}€/{l.conditionnement}{mp.unite}</p>
+                  <p className="font-medium text-gray-700 hover:underline">{(l.prix_actuel * l.conditionnement).toFixed(2)}€/{formaterConditionnement(l.conditionnement, mp.unite)}</p>
                   <p className="text-xs text-gray-400">
                     {l.prix_g_u_ml ? `${parseFloat(l.prix_g_u_ml).toFixed(6)}€/${mp.unite === 'kg' || mp.unite === 'L' ? (mp.unite === 'kg' ? 'g' : 'ml') : mp.unite || 'u'}` : ''}
                   </p>
