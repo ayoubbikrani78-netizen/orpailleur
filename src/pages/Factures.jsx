@@ -255,6 +255,7 @@ export default function Factures() {
     const echecs = []
     const nouveaux = []
     const fusionnes = []
+    const unitesIncoherentes = []
 
     // Chargé une seule fois : sert à reconnaître qu'un article "nouveau" pour CE fournisseur
     // correspond en réalité à un article déjà connu d'un AUTRE fournisseur (même produit,
@@ -288,6 +289,23 @@ export default function Factures() {
       const prixParUnite = prixBaseVersUnite(prixGUML, ligne.unite)
 
       if (lienExistant) {
+        // Deux lectures de facture peuvent désigner le même produit avec des unités différentes
+        // (ex: "24 pièces" une fois, "0.5L" une autre fois pour la même bouteille — erreur de
+        // lecture IA sur l'une des deux). Mélanger ces unités corromprait silencieusement le prix
+        // ET le stock : on refuse la ligne et on alerte, plutôt que de deviner laquelle a raison.
+        const uniteLigne = (ligne.unite || '').toLowerCase().trim()
+        const uniteLien = (lienExistant.unite || '').toLowerCase().trim()
+        if (uniteLigne && uniteLien && uniteLigne !== uniteLien) {
+          await supabase.from('alertes').insert({
+            type: 'ecart_prix',
+            message: `Unité incohérente détectée pour "${ligne.designation}" : mercuriale=${lienExistant.unite}, nouvelle lecture=${ligne.unite}. Cette ligne n'a pas été prise en compte pour le prix ni le stock — vérifie la fiche article.`,
+            reference_id: lienExistant.matiere_premiere_id,
+            reference_table: 'matieres_premieres'
+          })
+          unitesIncoherentes.push(ligne.designation)
+          continue
+        }
+
         // Une fois un article créé, on ne réécrit jamais silencieusement son conditionnement/unité
         // (une correction manuelle faite par le boulanger doit rester stable). Mais si la nouvelle
         // lecture de facture diffère nettement de ce qui est enregistré, on le signale par une
@@ -465,6 +483,16 @@ export default function Factures() {
       if (errLien) console.error(`Recherche article échouée pour "${ligne.designation}":`, errLien)
 
       if (lien) {
+        // Même garde-fou qu'à la ventilation : si l'unité lue sur cette ligne ne correspond pas à
+        // celle déjà connue pour l'article (ex: "L" au lieu de "pièce" pour un produit déjà en base),
+        // on n'utilise pas cette ligne pour le stock ni le prix — elle serait fausse dans les deux cas.
+        const uniteLigne = (ligne.unite || '').toLowerCase().trim()
+        const uniteArticle = (lien.matieres_premieres?.unite || '').toLowerCase().trim()
+        if (uniteLigne && uniteArticle && uniteLigne !== uniteArticle) {
+          nonAssociees.push(`${ligne.designation} (unité incohérente : ${ligne.unite} ≠ ${lien.matieres_premieres?.unite})`)
+          continue
+        }
+
         // Une même matière première peut apparaître sur plusieurs lignes de facture (ex: plusieurs
         // pièces d'un produit vendu au poids, pesées séparément, ou plusieurs livraisons groupées sur
         // une même facture) : on additionne les quantités ET les montants plutôt que d'écraser, pour
