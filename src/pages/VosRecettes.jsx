@@ -174,8 +174,12 @@ export default function VosRecettes() {
     fetchAll()
   }
 
+  // On ne remet plus jamais designation_brute à null ici : ce nom d'origine (celui du fichier
+  // source) reste affiché en permanence au-dessus du choix de rapprochement Mercuriale, même une
+  // fois l'ingrédient relié — l'utilisateur doit toujours pouvoir voir 'ce qu'il a demandé' et 'ce
+  // à quoi ça a été rapproché', et changer le second sans perdre le premier.
   async function resoudreIngredientEnAttente(ingredientId, matierePremiereId) {
-    await supabase.from('recette_ingredients').update({ matiere_premiere_id: matierePremiereId, designation_brute: null }).eq('id', ingredientId)
+    await supabase.from('recette_ingredients').update({ matiere_premiere_id: matierePremiereId }).eq('id', ingredientId)
     fetchAll()
   }
 
@@ -438,59 +442,27 @@ function Field({ label, children }) {
 }
 
 function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
-  const [enModification, setEnModification] = useState(false)
-
-  if (!ing.matiere_premiere_id && ing.designation_brute) {
-    return (
-      <tr className="border-t border-gray-100 first:border-t-0 bg-orange-50/40">
-        <td className="px-4 py-2 text-gray-500 italic">{ing.designation_brute}</td>
-        <td className="px-2 py-2 text-right text-gray-400 w-24">{ing.quantite} {ing.unite}</td>
-        <td className="px-2 py-2 text-right w-48" colSpan={2}>
-          <select
-            className="w-full border border-orange-300 bg-orange-50 rounded-lg px-2 py-1 text-xs text-gray-700"
-            value=""
-            onChange={(e) => e.target.value && onResoudre(ing.id, e.target.value)}
-          >
-            <option value="">— associer à un article —</option>
-            {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
-          </select>
-        </td>
-        <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
-      </tr>
-    )
-  }
-  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
+  const qteBase = ing.mp ? quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite) : 0
   const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
+  const relie = !!ing.matiere_premiere_id
 
-  if (enModification) {
-    return (
-      <tr className="border-t border-gray-100 first:border-t-0 bg-blue-50/40">
-        <td className="px-2 py-2" colSpan={2}>
-          <select
-            autoFocus
-            className="w-full border border-blue-300 bg-white rounded-lg px-2 py-1 text-xs text-gray-700"
-            value={ing.matiere_premiere_id || ''}
-            onChange={(e) => { if (e.target.value) { onResoudre(ing.id, e.target.value); setEnModification(false) } }}
-            onBlur={() => setEnModification(false)}
-          >
-            {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
-          </select>
-        </td>
-        <td className="px-2 py-2 text-right text-gray-500 w-24">{ing.quantite} {ing.unite}</td>
-        <td className="px-4 py-2 text-right w-20"></td>
-        <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
-      </tr>
-    )
-  }
   return (
-    <tr className="border-t border-gray-100 first:border-t-0">
-      <td className="px-4 py-2 text-gray-700 cursor-pointer hover:underline" onClick={() => setEnModification(true)} title="Cliquer pour changer l'article lié">
-        {ing.mp?.designation_interne || '—'}
-        {ing.erreur && <span className="ml-2 text-red-500 text-xs">⚠ {ing.erreur}</span>}
+    <tr className={`border-t border-gray-100 first:border-t-0 ${relie ? '' : 'bg-orange-50/40'}`}>
+      <td className="px-4 py-2" colSpan={2}>
+        {ing.designation_brute && <p className="text-gray-700 text-sm mb-1">{ing.designation_brute}</p>}
+        <select
+          className={`w-full border rounded-lg px-2 py-1 text-xs ${relie ? 'border-gray-200 text-gray-600' : 'border-orange-300 bg-orange-50 text-gray-700'}`}
+          value={ing.matiere_premiere_id || ''}
+          onChange={(e) => e.target.value && onResoudre(ing.id, e.target.value)}
+        >
+          <option value="">— associer à un article de la Mercuriale —</option>
+          {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
+        </select>
+        {ing.erreur && <p className="text-red-500 text-xs mt-1">⚠ {ing.erreur}</p>}
       </td>
       <td className="px-2 py-2 text-right text-gray-500 w-24">{ing.quantite} {ing.unite}</td>
-      <td className="px-2 py-2 text-right text-gray-500 w-28">× {ing.cmup.toFixed(5)}€/{uniteBaseLabel}</td>
-      <td className="px-4 py-2 text-right font-medium text-gray-700 w-20">{(qteBase * ing.cmup).toFixed(3)}€</td>
+      <td className="px-2 py-2 text-right text-gray-500 w-28">{relie ? `× ${ing.cmup.toFixed(5)}€/${uniteBaseLabel}` : ''}</td>
+      <td className="px-4 py-2 text-right font-medium text-gray-700 w-20">{relie ? `${(qteBase * ing.cmup).toFixed(3)}€` : ''}</td>
       <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
     </tr>
   )
