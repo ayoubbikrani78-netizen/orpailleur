@@ -508,6 +508,8 @@ function Field({ label, children }) {
 }
 
 function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
+  const [enModification, setEnModification] = useState(false)
+
   if (!ing.matiere_premiere_id && ing.designation_brute) {
     return (
       <tr className="border-t border-gray-100 first:border-t-0 bg-orange-50/40">
@@ -529,9 +531,30 @@ function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
   }
   const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
   const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
+
+  if (enModification) {
+    return (
+      <tr className="border-t border-gray-100 first:border-t-0 bg-blue-50/40">
+        <td className="px-2 py-2" colSpan={2}>
+          <select
+            autoFocus
+            className="w-full border border-blue-300 bg-white rounded-lg px-2 py-1 text-xs text-gray-700"
+            value={ing.matiere_premiere_id || ''}
+            onChange={(e) => { if (e.target.value) { onResoudre(ing.id, e.target.value); setEnModification(false) } }}
+            onBlur={() => setEnModification(false)}
+          >
+            {matieres.map((m) => <option key={m.id} value={m.id}>{m.designation_interne}</option>)}
+          </select>
+        </td>
+        <td className="px-2 py-2 text-right text-gray-500 w-24">{ing.quantite} {ing.unite}</td>
+        <td className="px-4 py-2 text-right w-20"></td>
+        <td className="pr-3 w-8"><button onClick={onDelete}><Trash2 size={13} className="text-gray-300 hover:text-red-500" /></button></td>
+      </tr>
+    )
+  }
   return (
     <tr className="border-t border-gray-100 first:border-t-0">
-      <td className="px-4 py-2 text-gray-700">
+      <td className="px-4 py-2 text-gray-700 cursor-pointer hover:underline" onClick={() => setEnModification(true)} title="Cliquer pour changer l'article lié">
         {ing.mp?.designation_interne || '—'}
         {ing.erreur && <span className="ml-2 text-red-500 text-xs">⚠ {ing.erreur}</span>}
       </td>
