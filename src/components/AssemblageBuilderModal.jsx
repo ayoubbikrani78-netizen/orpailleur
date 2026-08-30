@@ -95,7 +95,7 @@ export default function AssemblageBuilderModal({ ateliers, onClose, onCreated })
     const mp = matieres.find((m) => m.id === base?.matiere_premiere_id)
     let cmup = 0
     try { cmup = resoudreCmup(base?.matiere_premiere_id, ctx) } catch { cmup = 0 }
-    const qteBase = quantiteEnBase(ligne.quantite, ligne.unite, mp)
+    const qteBase = quantiteEnBase(ligne.quantite, ligne.unite, mp?.unite)
     return { ...ligne, base, mp, cmup, coutLigne: qteBase * cmup }
   })
 

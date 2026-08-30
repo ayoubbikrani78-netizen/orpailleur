@@ -344,7 +344,7 @@ export default function VosRecettes() {
                 {selectedElements.length > 0 && (
                   <div className="space-y-4 mb-4">
                     {selectedElements.map((el) => {
-                      const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp) * i.cmup, 0)
+                      const elTotal = el.ingredients.reduce((s, i) => s + quantiteEnBase(i.quantite, i.unite, i.mp?.unite) * i.cmup, 0)
                       return (
                         <div key={el.id} className="border border-gray-200 rounded-lg">
                           <div className="flex items-center justify-between px-4 py-2 bg-gray-50 rounded-t-lg">
@@ -457,7 +457,7 @@ function IngredientRow({ ing, matieres, onDelete, onResoudre }) {
       </tr>
     )
   }
-  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp)
+  const qteBase = quantiteEnBase(ing.quantite, ing.unite, ing.mp?.unite)
   const uniteBaseLabel = ing.mp?.unite ? (ing.mp.unite.toLowerCase() === 'kg' ? 'g' : ing.mp.unite.toLowerCase() === 'l' ? 'ml' : ing.mp.unite) : ''
   return (
     <tr className="border-t border-gray-100 first:border-t-0">
