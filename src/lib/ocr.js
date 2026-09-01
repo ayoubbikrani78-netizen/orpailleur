@@ -1,14 +1,35 @@
 // Module OCR partagé — utilisé par Factures.jsx et Reception.jsx
 //
-// ARCHITECTURE (v2, reconstruite après 10 jours d'itérations sur des cas réels) :
-// Le modèle ne fait plus AUCUN calcul. Il transcrit littéralement ce qui est imprimé sur la facture
-// (colonnes brutes en texte, sans interpréter les formats de nombres), et donne UNE seule information
-// calculée et bornée : le poids/volume total représenté par UNE unité de la colonne quantité.
-// Tout le reste — parsing des nombres (virgule/point), vérification de cohérence, calcul final du
-// stock — est fait ici en JavaScript déterministe et testé unitairement (voir les fonctions
-// parseNombre et parsePoidsVolume ci-dessous), plutôt que d'espérer que le modèle soit cohérent à
-// chaque facture. C'est ce découplage qui manquait dans les versions précédentes : demander au
-// modèle de lire ET de calculer en même temps est ce qui causait la plupart des erreurs récurrentes.
+// ARCHITECTURE v3 (réécriture complète après diagnostic sur 8 factures réelles de 3
+// fournisseurs) :
+//
+// Le modèle continue de NE FAIRE AUCUN calcul final — toute l'arithmétique reste en JS,
+// déterministe et testable (voir parseNombre / finaliserLigne ci-dessous). Ce qui change par
+// rapport à la v2 : on force le modèle à RAISONNER avant de trancher, pas à vérifier après coup.
+//
+// Pourquoi ce changement : la vérification a posteriori "montant ≈ quantité × conditionnement ×
+// prix" ne peut PAS détecter une inversion entre la colonne Quantité et la colonne
+// Conditionnement — la multiplication étant commutative, le total reste cohérent quel que soit
+// le sens de l'inversion. Ce cas s'est produit sur une vraie facture (voir le piège documenté
+// dans ANNOTATION_PROMPT ci-dessous) : le texte d'en-tête du tableau, tel qu'extrait par l'OCR,
+// ne respecte pas forcément l'ordre réel des colonnes.
+//
+// La correction structurelle : dans une sortie JSON structurée, les champs sont générés dans
+// l'ordre du schéma, de façon strictement séquentielle (pas de retour en arrière possible une
+// fois un champ écrit). On exploite ça en forçant, AVANT les champs numériques finaux :
+//   1. une transcription brute complète de la ligne (ancrage sur ce qui est réellement imprimé)
+//   2. une classification explicite du type de ligne (produit / frais / sous-total / rupture
+//      non livrée / texte libre) — remplace la détection a posteriori par mots-clés comme
+//      défense principale (le filet par mots-clés reste en secours, cf. MOTS_CLES_NON_PRODUIT)
+//   3. une analyse en texte libre où le modèle résout la ligne comme une équation : il identifie
+//      le produit et son conditionnement d'après son NOM, puis assigne les nombres de la ligne
+//      en conséquence — jamais d'après la position du texte dans l'en-tête du tableau
+// Ce n'est qu'après cette analyse que les champs numériques finaux sont écrits, informés par le
+// raisonnement qui précède.
+//
+// Un filet de sécurité JS supplémentaire (finaliserLigne, "Filet n°4") détecte spécifiquement
+// une inversion Cond'/Quantité résiduelle, en comparant au poids/volume détecté indépendamment
+// dans la désignation — voir le commentaire sur place pour le détail du raisonnement.
 
 const MISTRAL_API_KEY = import.meta.env.VITE_MISTRAL_API_KEY
 
@@ -53,16 +74,26 @@ const INVOICE_SCHEMA = {
             type: 'object',
             additionalProperties: false,
             properties: {
+              ligne_brute_complete: { type: 'string' },
+              classification: {
+                type: 'string',
+                enum: ['produit', 'frais_ou_remise', 'sous_total_categorie', 'rupture_non_livree', 'texte_libre_ignorer']
+              },
+              analyse: { type: 'string' },
               designation: { type: 'string' },
-              quantite_brute: { type: 'string' },
               conditionnement_colonne_brute: { type: 'string' },
+              quantite_brute: { type: 'string' },
               prix_unitaire_brut: { type: 'string' },
               montant_brut: { type: 'string' },
               poids_volume_par_unite: { type: 'string' },
               univers_suggere: { type: 'string' },
               famille_suggere: { type: 'string' }
             },
-            required: ['designation', 'quantite_brute', 'conditionnement_colonne_brute', 'prix_unitaire_brut', 'montant_brut', 'poids_volume_par_unite', 'univers_suggere', 'famille_suggere']
+            required: [
+              'ligne_brute_complete', 'classification', 'analyse', 'designation',
+              'conditionnement_colonne_brute', 'quantite_brute', 'prix_unitaire_brut', 'montant_brut',
+              'poids_volume_par_unite', 'univers_suggere', 'famille_suggere'
+            ]
           }
         }
       },
@@ -74,27 +105,49 @@ const INVOICE_SCHEMA = {
 const ANNOTATION_PROMPT = `Tu es un expert en lecture de factures fournisseurs pour une boulangerie française.
 Ce document peut être n'importe quel type de facture (grande distribution, grossiste, artisan, meunerie, multi-pages, etc.) — adapte-toi à sa mise en page réelle.
 
-RÈGLE LA PLUS IMPORTANTE : TU NE FAIS JAMAIS DE CALCUL. Tu transcris littéralement ce qui est imprimé, exactement caractère pour caractère, y compris les virgules et points tels qu'ils apparaissent (ex: si tu vois "1,025.00", écris exactement "1,025.00" dans le JSON, ne le convertis JAMAIS en 1025 ou 1.025 toi-même — c'est un programme séparé qui s'en charge). La seule chose que tu calcules est le champ "poids_volume_par_unite" décrit plus bas, qui reste un calcul simple et borné.
+RÈGLE LA PLUS IMPORTANTE : TU NE FAIS JAMAIS DE CALCUL FINAL. Tu transcris littéralement ce qui est imprimé, exactement caractère pour caractère, y compris les virgules et points tels qu'ils apparaissent (ex: si tu vois "1,025.00", écris exactement "1,025.00", ne le convertis JAMAIS toi-même — c'est un programme séparé qui s'en charge). Les seuls champs qui demandent un raisonnement de ta part sont "analyse" (texte libre, décrit ci-dessous) et "poids_volume_par_unite" (un calcul simple et borné, décrit plus bas) — ni l'un ni l'autre ne remplace la transcription exacte des autres champs.
 
 RÈGLE SUR LES SURIMPRESSIONS : si le document comporte un filigrane ou tampon ("DUPLICATA", "COPIE"...), ignore-le et lis le texte imprimé original en dessous.
+
+RÈGLE SUR LE PÉRIMÈTRE DES LIGNES : ne crée une entrée dans "lignes" que pour les LIGNES DU TABLEAU de produits/facturation (une entrée par ligne de tableau, qu'elle soit produit ou non — la classification s'occupe de trier). Le texte libre en dehors du tableau (instructions de livraison, coordonnées client, conditions générales, minimum de commande, mentions légales...) n'est jamais une ligne et ne doit jamais produire d'entrée.
 
 === FOURNISSEUR ET FACTURE ===
 - "numero" : le numéro de facture complet tel qu'imprimé à côté de "N° FACTURE" ou équivalent, sans le tronquer, même s'il est composite (plusieurs blocs entre parenthèses).
 - "montant_total_ht_brut" et "montant_total_ttc_brut" : recopie exactement le texte des montants totaux (Total HT / Net à Payer / Total TTC), avec la ponctuation d'origine. Si la facture a plusieurs taux de TVA (plusieurs lignes dans un tableau "VENTILATION TVA"), cherche en priorité une ligne de total déjà additionnée ; si tu ne la trouves pas, indique la somme des lignes de HT sous forme de texte numérique (ex: si 25,94 et 633,30, écris "659.24" ou "659,24").
 - Si un champ est introuvable, retourne une chaîne vide "" — n'invente jamais de valeur.
 
-=== LIGNES PRODUITS : transcription brute des colonnes ===
-Pour chaque ligne du tableau de produits :
-- "designation" : le nom du produit uniquement (première ligne de texte de la cellule si plusieurs infos y sont empilées — ignore les mentions de ristourne/remise/note qualité empilées en dessous, ne les traite jamais comme des lignes séparées). Attention : si une NOUVELLE ligne du tableau commence avec sa propre valeur de quantité (même si c'est de nouveau "1"), c'est une ligne PRODUIT distincte, même si elle suit immédiatement une autre ligne — ne l'avale jamais dans la ligne précédente.
+=== MÉTHODE POUR CHAQUE LIGNE DE TABLEAU (à appliquer dans cet ordre) ===
 
-EXEMPLE CONCRET (cellule empilée à gérer correctement) : une ligne de tableau affiche, empilés dans la même cellule Désignation : "SENONE-25 kg" / "RISTOURNE POUR PAIEMENT RAPIDE" / "RISTOURNE EXCEPTIONNELLE" / "** PRIX UNITAIRE NET" / "Farine Label Rouge issue de blé CRC", avec Nombre sacs=10, Nombre tonnes=0.250, et dans la colonne Prix unitaire empilée : "1,060.00" / "42.50" / "277.50" / "740.00", Montant H.T.=185.00. Ceci doit produire UNE seule ligne : designation="SENONE-25 kg", quantite_brute="10", prix_unitaire_brut="740.00" (le prix net, dernière valeur empilée), montant_brut="185.00", poids_volume_par_unite="25kg" (25kg par sac). N'oublie pas cette ligne : c'est souvent la plus grosse ligne de la facture, et la présence de plusieurs mentions empilées ne doit jamais te faire l'ignorer ou la fusionner avec autre chose.
-- "quantite_brute" : le nombre de la colonne quantité/nombre de sacs/nombre de colis achetés, tel qu'imprimé (en texte).
-- "conditionnement_colonne_brute" : si une colonne séparée "Cond'"/"Conditionnement"/"Colisage" existe, son nombre tel qu'imprimé. Sinon "".
+ÉTAPE 1 — "ligne_brute_complete" : transcris toute la ligne telle qu'imprimée, toutes colonnes confondues, sans interpréter ni trier. C'est ton ancrage : tu dois pouvoir répondre à toutes les étapes suivantes rien qu'en relisant ce texte.
+
+ÉTAPE 2 — "classification" : choisis UNE catégorie parmi :
+- "produit" : une vraie ligne de marchandise achetée, avec quantité/prix/montant.
+- "frais_ou_remise" : frais de transport/port, remise, ristourne, escompte, acompte, annulation, arrhes, frais d'impayé ou de rejet de prélèvement ("FRAIS IMPAYES", "REJET PRELEVEMENT"...), ou toute ligne "FRAIS ..." qui n'est pas une marchandise physique.
+- "sous_total_categorie" : une ligne récapitulative intercalée AU MILIEU du tableau de produits, du type "---> TOTAL : PRODUITS FRAIS", "TOTAL PRODUITS SECS/SURGELES" — ce n'est jamais un produit, même si un montant y figure.
+- "rupture_non_livree" : une ligne commandée mais explicitement marquée comme non livrée (mot "Manquant" ou équivalent à la place du prix/montant), même si une quantité commandée est indiquée à côté.
+- "texte_libre_ignorer" : une ligne de tableau qui ne contient en réalité que du texte informatif sans donnée chiffrée exploitable.
+Seules les lignes "produit" seront conservées après traitement — classe soigneusement, ne classe jamais un vrai produit ailleurs juste par doute, et inversement ne classe jamais en "produit" une ligne de frais ou un sous-total.
+
+ÉTAPE 3 — "analyse" (texte libre, quelques phrases) : résous la ligne comme une équation, pas comme des cases à remplir indépendamment.
+D'abord, identifie ce qu'est le produit et son conditionnement D'APRÈS SON NOM (pas d'après la position des colonnes) : si le nom annonce un poids/volume précis (ex: "3kg", "10kg", "BIB 5L", "SAC 2.5KG"), c'est ce nombre qui doit correspondre au conditionnement.
+Ensuite, assigne les nombres de la ligne aux bons champs en vérifiant que quantité × conditionnement × prix ≈ montant, ET que la valeur assignée au conditionnement correspond bien au poids/volume identifié dans le nom.
+
+PIÈGE RÉEL À CONNAÎTRE (ne jamais s'y faire prendre) : sur certains formats de facture, le texte de l'en-tête du tableau, tel qu'extrait, ne respecte PAS l'ordre réel des colonnes imprimées (colonnes empilées sur plusieurs lignes de texte lors de l'extraction). Exemple vécu : une ligne affiche la désignation "FOURRAGE CROQUANT MANGUE PASSION 3kg", puis les nombres "3,00" et "1", puis un prix "24,100" et un montant "72,30". Le nom annonce "3kg" → c'est le "3,00" qui est le CONDITIONNEMENT (poids d'un sac), le "1" est la QUANTITÉ (1 sac commandé) — même si l'en-tête du tableau semblait suggérer l'ordre inverse. Ne te fie JAMAIS à la position du texte d'en-tête pour décider quel nombre est la quantité et lequel est le conditionnement : fie-toi uniquement à la correspondance avec le nom du produit, complétée par la vérification quantité × conditionnement × prix ≈ montant.
+
+ÉTAPE 4 — remplis les champs finaux, en cohérence avec l'analyse qui précède :
+- "designation" : le nom du produit uniquement (première ligne de texte de la cellule si plusieurs infos y sont empilées). Deux types de sous-lignes empilées à absorber SANS jamais les traiter comme des lignes séparées :
+  (a) mentions de ristourne/remise/note qualité (ex: "RISTOURNE POUR PAIEMENT RAPIDE", "** PRIX UNITAIRE NET") — voir l'exemple SENONE ci-dessous ;
+  (b) mentions de traçabilité produit (ex: "Qte=10 DLC=18/06/2026 Lot Frs=N6080109111") — fréquentes sur certains formats, une ligne de ce type sous chaque désignation, jamais un produit distinct.
+  Attention : si une NOUVELLE ligne du tableau commence avec sa propre valeur de quantité (même si c'est de nouveau "1"), c'est une ligne PRODUIT distincte, même si elle suit immédiatement une autre ligne — ne l'avale jamais dans la ligne précédente.
+
+EXEMPLE CONCRET (cellule empilée à gérer correctement) : une ligne de tableau affiche, empilés dans la même cellule Désignation : "SENONE-25 kg" / "RISTOURNE POUR PAIEMENT RAPIDE" / "RISTOURNE EXCEPTIONNELLE" / "** PRIX UNITAIRE NET" / "Farine Label Rouge issue de blé CRC", avec Nombre sacs=10, Nombre tonnes=0.250, et dans la colonne Prix unitaire empilée : "1,060.00" / "42.50" / "277.50" / "740.00", Montant H.T.=185.00. Ceci doit produire UNE seule ligne "produit" : designation="SENONE-25 kg", quantite_brute="10", prix_unitaire_brut="740.00" (le prix net, dernière valeur empilée), montant_brut="185.00", poids_volume_par_unite="25kg" (25kg par sac). N'oublie pas cette ligne : c'est souvent la plus grosse ligne de la facture.
+
+- "quantite_brute" et "conditionnement_colonne_brute" : les deux nombres identifiés à l'étape 3, tels qu'imprimés (en texte). Si une seule colonne quantité existe (pas de colonne Cond' séparée), laisse "conditionnement_colonne_brute" à "".
 - "prix_unitaire_brut" : le prix unitaire NET tel qu'imprimé. Si plusieurs valeurs sont empilées dans cette cellule (prix de base, ristourne(s), puis prix net — souvent précédé de "** PRIX UNITAIRE NET"), prends UNIQUEMENT la dernière (le prix net), jamais le prix de base ni les ristournes.
 - "montant_brut" : le montant HT de cette ligne, tel qu'imprimé dans la colonne Montant/Montant H.T. — jamais une des valeurs empilées de la colonne prix, jamais un sous-total de catégorie.
-- N'inclus JAMAIS dans "lignes" les lignes de frais/remise/ajustement qui ne sont pas des produits physiques : frais de transport/port, remises, ristournes, escomptes, acomptes, annulations, arrhes.
+- Quantité décimale (ex: "2,414") : normal pour un produit vendu au poids réel pesé (poissonnerie, fromage à la coupe...) — ce n'est pas une anomalie, ne l'arrondis pas et ne la rejette pas.
 
-=== LE CHAMP "poids_volume_par_unite" (le seul calcul demandé) ===
+=== LE CHAMP "poids_volume_par_unite" (le seul calcul demandé, en plus de "analyse") ===
 Réponds à cette question précise : "si j'achète UNE unité de la colonne quantité (un sac, un colis, un carton...), quel poids ou volume total cela représente-t-il ?" Donne la réponse sous forme de texte avec unité collée, ex: "2.5kg", "0.48kg", "25kg", "7.92L", "100piece". Si le produit n'a aucun poids/volume pertinent (fleurs décoratives, ustensiles, emballages sans poids donné), écris "1piece".
 
 FORMULE À APPLIQUER : poids_volume_par_unite = (valeur de la colonne Colisage/Cond', si elle existe et représente un nombre de sous-unités par colis — sinon 1) × (poids ou volume d'UNE sous-unité de base, tel qu'indiqué dans la désignation ou le nom du produit).
@@ -118,7 +171,7 @@ Ne confonds pas avec un ingrédient brut destiné à être transformé (farine, 
 - Attention aux nombres qui décrivent une CONTENANCE d'un contenant plutôt qu'une quantité de produit achetée : ex. "SACS POUBELLES 130L" (sacs conçus pour contenir 130 litres de déchets, pas 130L de produit), "BAC RECT 20L 53X40 H14CM" (un bac de rangement d'une contenance de 20L — tu achètes des bacs vides, pas 20L de quelque chose), "SEAU 5L" quand c'est le nom d'un contenant vide vendu comme ustensile. Dans ces cas, ignore ce nombre et réponds "1piece" par bac/contenant acheté (ou le comptage d'unités s'il y en a un, ex: "20u x 5" -> "100piece"). Ne confonds jamais la contenance d'un contenant avec le poids/volume d'un produit alimentaire conditionné dedans (ex: "OEUF ENTIER LIQUIDE BIB 5L" est bien 5L de produit, car c'est un aliment liquide vendu par le volume — la distinction se fait sur si le nom désigne un ustensile/contenant vide ou un aliment).
 
 === CATÉGORISATION (univers_suggere / famille_suggere) ===
-Propose une catégorie pour chaque ligne produit, en te basant UNIQUEMENT sur son nom — c'est une suggestion que le boulanger pourra corriger, pas un calcul, donc reste dans la liste ci-dessous et n'invente pas de nouvelle catégorie. Si tu hésites vraiment entre plusieurs sous-catégories, choisis la plus probable plutôt que de laisser vide ; ne laisse vide ("") que si le produit ne correspond à aucune catégorie de la liste. Ne catégorise jamais un "PRALINE ... MAISON" ou tout autre produit visiblement fabriqué en interne (laisse univers_suggere et famille_suggere vides).
+Propose une catégorie pour chaque ligne produit, en te basant UNIQUEMENT sur son nom — c'est une suggestion que le boulanger pourra corriger, pas un calcul, donc reste dans la liste ci-dessous et n'invente pas de nouvelle catégorie. Si tu hésites vraiment entre plusieurs sous-catégories, choisis la plus probable plutôt que de laisser vide ; ne laisse vide ("") que si le produit ne correspond à aucune catégorie de la liste. Ne catégorise jamais un "PRALINE ... MAISON" ou tout autre produit visiblement fabriqué en interne (laisse univers_suggere et famille_suggere vides). Pour une ligne non "produit" (frais, sous-total, rupture, texte libre), laisse ces deux champs vides.
 
 Catégories disponibles et leurs sous-catégories (inspirées des rayons de grande surface) :
 - Boissons : Café & thé, Eaux, Jus & nectars, Sirops, Sodas, Énergisants
@@ -185,14 +238,39 @@ export function parsePoidsVolume(texte) {
   return { valeur, unite: 'piece' }
 }
 
-// Filet de sécurité déterministe : lignes de frais/remise/ajustement à exclure même si le
-// modèle les a quand même incluses par erreur.
-const MOTS_CLES_NON_PRODUIT = /FRAIS DE (TRANSPORT|PORT)|RISTOURNE|REMISE|ESCOMPTE|ACOMPTE|ANNULATION|ARRHES/i
+// Filet de sécurité déterministe : lignes de frais/remise/ajustement/sous-total à exclure même
+// si le modèle les a quand même classifiées "produit" par erreur (défense en profondeur — la
+// classification explicite du modèle reste la défense principale, voir corrigerLignes).
+const MOTS_CLES_NON_PRODUIT = /FRAIS DE (TRANSPORT|PORT)|FRAIS IMPAYE|REJET PRELEVEMENT|RISTOURNE|REMISE|ESCOMPTE|ACOMPTE|ANNULATION|ARRHES|-+>?\s*TOTAL\s*:/i
+
+// Classifications qui ne doivent jamais devenir une ligne de stock/coût — tout sauf "produit".
+const CLASSIFICATIONS_A_EXCLURE = new Set([
+  'frais_ou_remise', 'sous_total_categorie', 'rupture_non_livree', 'texte_libre_ignorer'
+])
+
+// ---------------------------------------------------------------------------
+// Extrait un poids/volume explicite (kg/g/L/mL/cl) écrit dans la désignation, normalisé en
+// {valeur, unite:'kg'|'L'}. Factorisé car réutilisé à la fois par detecterPoidsVolumeTexte (filet
+// de secours n°2) et par le filet anti-inversion Cond'/Quantité (filet n°4) dans finaliserLigne.
+// ---------------------------------------------------------------------------
+function extrairePoidsExpliciteDesignation(designation) {
+  if (!designation) return null
+  const m = designation.match(/(\d+(?:[.,]\d+)?)\s*(KG|GRS|GRAMMES|GR|G|ML|CL|L)\b/i)
+  if (!m) return null
+  const valeur = parseFloat(m[1].replace(',', '.'))
+  if (!(valeur > 0)) return null
+  const unite = m[2].toUpperCase()
+  if (unite === 'G' || unite === 'GR' || unite === 'GRS' || unite === 'GRAMMES') return { valeur: valeur / 1000, unite: 'kg' }
+  if (unite === 'ML') return { valeur: valeur / 1000, unite: 'L' }
+  if (unite === 'CL') return { valeur: valeur / 100, unite: 'L' }
+  if (unite === 'KG') return { valeur, unite: 'kg' }
+  if (unite === 'L') return { valeur, unite: 'L' }
+  return null
+}
 
 // ---------------------------------------------------------------------------
 // Calcul final déterministe d'une ligne à partir des champs bruts transcrits par le modèle.
 // C'est ici, et non dans le modèle, que se fait toute l'arithmétique — donc testable.
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // Filet de sécurité déterministe, indépendant du modèle : détecte un poids/volume/comptage
 // explicite dans la désignation. Réintégré après avoir constaté que le modèle seul est
@@ -221,18 +299,8 @@ function detecterPoidsVolumeTexte(designation) {
   // séparément dans detecterMotifCompose ci-dessous : ce motif s'est montré tellement peu fiable
   // pour le modèle (il ne renvoie que le petit poids unitaire, sans le multiplier) qu'on l'applique
   // TOUJOURS, même quand le modèle a déjà répondu autre chose que la valeur par défaut.
-  const m = designation.match(/(\d+(?:[.,]\d+)?)\s*(KG|GRS|GRAMMES|GR|G|ML|CL|L)\b/i)
-  if (m) {
-    let valeur = parseFloat(m[1].replace(',', '.'))
-    const unite = m[2].toUpperCase()
-    if (valeur > 0) {
-      if (unite === 'G' || unite === 'GR' || unite === 'GRS' || unite === 'GRAMMES') return { valeur: valeur / 1000, unite: 'kg' }
-      if (unite === 'ML') return { valeur: valeur / 1000, unite: 'L' }
-      if (unite === 'CL') return { valeur: valeur / 100, unite: 'L' }
-      if (unite === 'KG') return { valeur, unite: 'kg' }
-      if (unite === 'L') return { valeur, unite: 'L' }
-    }
-  }
+  const explicite = extrairePoidsExpliciteDesignation(designation)
+  if (explicite) return explicite
   const boite = designation.match(/(?<!\d)(\d{1,2})\/1\b/)
   if (boite) {
     const valeur = parseFloat(boite[1])
@@ -299,12 +367,24 @@ export function finaliserLigne(ligneBrute) {
   // Vérification de cohérence sur les valeurs BRUTES de la facture (indépendante de toute
   // conversion en kg/L) : montant ≈ prix_unitaire × conditionnement_colonne × quantite.
   // On ne corrige jamais vers 0 (une ligne facturée avec un montant positif correspond
-  // toujours à au moins 1 unité achetée).
+  // toujours à au moins 1 unité achetée). Cette vérification ne peut PAS détecter une inversion
+  // entre quantite et conditionnement (multiplication commutative) — voir le filet n°4 plus bas
+  // pour ce cas précis.
   let quantite = quantiteColonne
   if (prixUnitaire > 0 && montant > 0 && conditionnementColonne > 0) {
-    const quantiteCalculee = Math.round(montant / (prixUnitaire * conditionnementColonne))
-    const ecart = Math.abs(quantiteCalculee - quantite) / (quantite || 1)
-    if (ecart > 0.05 && quantiteCalculee >= 1) quantite = quantiteCalculee
+    const quantiteCalculeeExacte = montant / (prixUnitaire * conditionnementColonne)
+    const ecart = Math.abs(quantiteCalculeeExacte - quantite) / (quantite || 1)
+    if (ecart > 0.05) {
+      // Le nombre de colis reçus est presque toujours un entier (une quantité mal lue par l'OCR,
+      // ex: "8" lu "3", se détecte bien en arrondissant) — SAUF pour un produit vendu au poids
+      // réel pesé (poissonnerie, fromage à la coupe...), où quantite_brute EST déjà la valeur
+      // exacte et ne doit jamais être arrondie (cas réel constaté : "2,414" arrondi à tort en "2").
+      // On ne fait donc confiance à l'arrondi que s'il retombe lui-même très près de la valeur
+      // calculée exacte — sinon, la quantité brute décimale est la bonne, on la garde telle quelle.
+      const quantiteArrondie = Math.round(quantiteCalculeeExacte)
+      const ecartArrondi = Math.abs(quantiteArrondie - quantiteCalculeeExacte) / (quantiteCalculeeExacte || 1)
+      if (quantiteArrondie >= 1 && ecartArrondi < 0.05) quantite = quantiteArrondie
+    }
   }
 
   // Poids/volume total pour une unité achetée (indépendant de conditionnementColonne, qui ne
@@ -341,6 +421,23 @@ export function finaliserLigne(ligneBrute) {
     poidsVolume = { valeur: 1, unite: 'piece' }
   }
 
+  // Filet de sécurité n°4 : détection d'inversion Cond'/Quantité. Sur certains formats de facture,
+  // le texte de l'en-tête du tableau tel qu'extrait ne respecte pas l'ordre réel des colonnes, ce
+  // qui peut faire lire par erreur le conditionnement à la place de la quantité (et vice-versa).
+  // La vérification de cohérence ci-dessus (montant ≈ quantité × cond × prix) ne peut PAS détecter
+  // ce cas précis : la multiplication étant commutative, le total reste cohérent quel que soit le
+  // sens de l'inversion. On croise donc plutôt avec poidsVolume — déjà déterminé, lui, en priorité
+  // depuis le texte de la désignation (filets 1/1bis/2 ci-dessus, indépendants de cette confusion
+  // de colonnes) : si sa valeur correspond à la quantité lue plutôt qu'au conditionnement lu, c'est
+  // le signe d'une inversion — on corrige la quantité réelle de colis reçus en conséquence.
+  if (poidsVolume.unite !== 'piece' && conditionnementColonne > 0 && quantiteColonne > 0) {
+    const ecartAvecCond = Math.abs(poidsVolume.valeur - conditionnementColonne) / poidsVolume.valeur
+    const ecartAvecQte = Math.abs(poidsVolume.valeur - quantiteColonne) / poidsVolume.valeur
+    if (ecartAvecQte < 0.02 && ecartAvecCond > 0.02) {
+      quantite = conditionnementColonne
+    }
+  }
+
   return {
     designation,
     reference: ligneBrute.reference || '',
@@ -358,9 +455,29 @@ function corrigerLignes(lignesBrutes) {
   if (!Array.isArray(lignesBrutes)) return []
   const result = []
   for (const ligneBrute of lignesBrutes) {
-    if (MOTS_CLES_NON_PRODUIT.test(ligneBrute.designation || '')) continue
     if (!ligneBrute.designation) continue
-    result.push(finaliserLigne(ligneBrute))
+
+    // Défense n°1 (principale) : classification explicite décidée par le modèle avant même de
+    // remplir les champs numériques — voir ANNOTATION_PROMPT, étape 2.
+    if (CLASSIFICATIONS_A_EXCLURE.has(ligneBrute.classification)) continue
+
+    // Défense n°2 (secours) : filet par mots-clés sur la désignation, indépendant du modèle, au
+    // cas où la classification aurait été mal renseignée.
+    if (MOTS_CLES_NON_PRODUIT.test(ligneBrute.designation)) continue
+
+    // Défense n°3 (secours) : le mot "Manquant" peut apparaître dans les colonnes prix/montant
+    // plutôt que dans la désignation — cas réel constaté (rupture de stock fournisseur).
+    const texteValeurs = `${ligneBrute.prix_unitaire_brut || ''} ${ligneBrute.montant_brut || ''}`
+    if (/manquant/i.test(texteValeurs)) continue
+
+    const ligne = finaliserLigne(ligneBrute)
+
+    // Défense n°4 (secours) : une ligne sans aucune valeur financière (prix ET montant nuls après
+    // parsing) ne correspond à rien de réellement facturé — échantillon gratuit, ligne
+    // informative résiduelle, etc. Cas réel constaté sur des factures de farine.
+    if (ligne.prix_unitaire_ht === 0 && ligne.montant_ht === 0) continue
+
+    result.push(ligne)
   }
   return result
 }
