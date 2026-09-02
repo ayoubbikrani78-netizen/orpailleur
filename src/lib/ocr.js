@@ -443,6 +443,24 @@ export function finaliserLigne(ligneBrute) {
     }
   }
 
+  // Filet de sécurité n°6 : sur les formats de facture qui impriment une métadonnée de
+  // traçabilité "Qte=N" distincte des colonnes du tableau (constaté sur le fournisseur DGF), ce
+  // nombre est un signal fiable et redondant, indépendant des colonnes ambiguës du tableau — donc
+  // pas sujet aux mêmes erreurs (contamination par un sous-total voisin, inversion de colonnes).
+  // Cas réel constaté : EXTRAIT VANILLE avait quantite_brute="5" et Qte=5 concordants dans la
+  // donnée brute, mais un montant_brut contaminé par le sous-total voisin (437,04 au lieu de
+  // 208,10) faisait dévier le filet de cohérence ci-dessus vers une quantité corrigée à tort (11).
+  // On fait donc confiance à "Qte=" en dernier recours quand elle diverge de la quantité retenue.
+  const matchQte = ligneBrute.ligne_brute_complete
+    ? ligneBrute.ligne_brute_complete.match(/\bQte\s*=\s*(\d+(?:[.,]\d+)?)/i)
+    : null
+  if (matchQte) {
+    const quantiteFiable = parseNombre(matchQte[1])
+    if (quantiteFiable > 0 && Math.abs(quantiteFiable - quantite) / quantite > 0.02) {
+      quantite = quantiteFiable
+    }
+  }
+
   return {
     designation,
     reference: ligneBrute.reference || '',
