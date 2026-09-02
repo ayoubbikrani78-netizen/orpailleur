@@ -456,6 +456,57 @@ export function finaliserLigne(ligneBrute) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Filet de sécurité n°5, déterministe (JS, pas le modèle) : récupération d'une ligne produit
+// fusionnée avec un sous-total de catégorie. Constaté en usage réel : malgré une instruction
+// explicite et un exemple travaillé dans le prompt (voir ANNOTATION_PROMPT), le modèle continue
+// par moments à faire atterrir les valeurs numériques d'une ligne produit (Cond'/Quantité/Prix/
+// Montant) APRÈS le texte "TOTAL : ..." dans ligne_brute_complete, au lieu de les laisser sur
+// leur propre entrée "produit" — cf. le cas réel "TARTINABLE PHILADELPHIA NATURE 1.650KG Qte=4
+// DLC=05/08/2026 Lot Frs=OFA1360653 ---> TOTAL : PRODUITS FRAIS 1,65 4 10,932 72,15 1 5", où
+// "1,65 4 10,932 72,15" sont bien les valeurs de TARTINABLE, pas du sous-total. On ne continue
+// pas à négocier avec le prompt sur ce point précis : on récupère la donnée nous-mêmes.
+// ---------------------------------------------------------------------------
+function recupererLigneAvantTotal(ligneBrute) {
+  const texte = ligneBrute.ligne_brute_complete || ''
+  const matchTotal = texte.match(/-+>?\s*TOTAL\s*:\s*[^\d]*/i)
+  if (!matchTotal) return null
+
+  // La désignation s'arrête à la première des deux bornes : le début des métadonnées de
+  // traçabilité ("Qte=...") ou le marqueur de sous-total lui-même, selon ce qui vient en premier.
+  const indexQte = texte.search(/Qte\s*=/i)
+  const borne = Math.min(indexQte >= 0 ? indexQte : Infinity, matchTotal.index)
+  const designation = texte.slice(0, borne).trim()
+  if (designation.length < 3) return null
+
+  // Nombres trouvés APRÈS le marqueur de sous-total : ce sont les valeurs Cond'/Quantité/Prix/
+  // Montant de la ligne produit fusionnée. On exige au moins 3 valeurs pour reconstruire de façon
+  // fiable (conditionnement, quantité, prix — le montant peut être recalculé) ; en dessous, mieux
+  // vaut ne rien reconstruire que de deviner, la ligne reste alors "à vérifier" manuellement.
+  const apresTotal = texte.slice(matchTotal.index + matchTotal[0].length)
+  const nombres = apresTotal.match(/\d+(?:[.,]\d+)?/g) || []
+  if (nombres.length < 3) {
+    console.warn('OCR — ligne fusionnée avec un sous-total, pas assez de valeurs pour la récupérer automatiquement :', texte)
+    return null
+  }
+
+  const [cond, qte, prix, montant] = nombres
+  console.warn('OCR — ligne produit récupérée depuis un sous-total fusionné par le modèle :', designation, '| brut :', texte)
+  return {
+    ligne_brute_complete: texte,
+    classification: 'produit',
+    analyse: 'Reconstruit par filet de sécurité JS (ligne fusionnée avec un sous-total par le modèle).',
+    designation,
+    conditionnement_colonne_brute: cond || '',
+    quantite_brute: qte || '',
+    prix_unitaire_brut: prix || '',
+    montant_brut: montant || '',
+    poids_volume_par_unite: '',
+    univers_suggere: '',
+    famille_suggere: ''
+  }
+}
+
 function corrigerLignes(lignesBrutes) {
   if (!Array.isArray(lignesBrutes)) return []
   const result = []
@@ -464,7 +515,18 @@ function corrigerLignes(lignesBrutes) {
 
     // Défense n°1 (principale) : classification explicite décidée par le modèle avant même de
     // remplir les champs numériques — voir ANNOTATION_PROMPT, étape 2.
-    if (CLASSIFICATIONS_A_EXCLURE.has(ligneBrute.classification)) continue
+    if (CLASSIFICATIONS_A_EXCLURE.has(ligneBrute.classification)) {
+      // Avant d'exclure un sous-total de catégorie, on tente de récupérer une ligne produit que
+      // le modèle y aurait fusionnée par erreur (filet n°5, voir plus haut).
+      if (ligneBrute.classification === 'sous_total_categorie') {
+        const recuperee = recupererLigneAvantTotal(ligneBrute)
+        if (recuperee) {
+          const ligne = finaliserLigne(recuperee)
+          if (!(ligne.prix_unitaire_ht === 0 && ligne.montant_ht === 0)) result.push(ligne)
+        }
+      }
+      continue
+    }
 
     // Défense n°2 (secours) : filet par mots-clés sur la désignation, indépendant du modèle, au
     // cas où la classification aurait été mal renseignée.
