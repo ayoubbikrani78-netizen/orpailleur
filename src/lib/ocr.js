@@ -633,6 +633,26 @@ export async function extractInvoiceData(base64Pdf) {
 
   console.log('OCR — lignes après calcul déterministe :', extracted.lignes)
 
+  // Contrôle de cohérence indépendant du modèle : la facture indique elle-même son propre total
+  // HT. Si la somme des lignes retenues (+ les frais/remises légitimement exclus du stock, dont
+  // on connaît quand même le montant) s'en écarte significativement, c'est un signal fiable qu'une
+  // ou plusieurs lignes ont été perdues (quelle qu'en soit la cause) — même si aucune erreur
+  // ponctuelle n'a été détectée par ailleurs. On réintègre les frais/remises dans le total attendu
+  // pour ne pas déclencher une fausse alerte sur les factures avec frais de transport légitimes
+  // (exclus du stock mais bien comptés dans le total HT de la facture).
+  const totalLignes = extracted.lignes.reduce((somme, l) => somme + l.montant_ht, 0)
+  const totalFrais = (brut.lignes || [])
+    .filter(l => l.classification === 'frais_ou_remise')
+    .reduce((somme, l) => somme + parseNombre(l.montant_brut), 0)
+  const totalAttendu = totalLignes + totalFrais
+  const totalFacture = extracted.facture.montant_total_ht
+  const ecartMontant = totalFacture > 0 ? Math.abs(totalFacture - totalAttendu) : 0
+  const ecartSuspect = totalFacture > 0 && ecartMontant > 2
+  extracted.controleTotal = { totalLignes: Math.round(totalLignes * 100) / 100, totalFrais: Math.round(totalFrais * 100) / 100, totalFacture, ecart: Math.round(ecartMontant * 100) / 100, suspect: ecartSuspect }
+  if (ecartSuspect) {
+    console.warn(`OCR — écart suspect entre le total facturé (${totalFacture}€) et la somme des lignes + frais extraits (${totalAttendu.toFixed(2)}€) : ${ecartMontant.toFixed(2)}€ manquant. Des lignes ont probablement été perdues — vérifier manuellement.`)
+  }
+
   const champsClesManquants =
     !extracted.fournisseur?.nom &&
     !extracted.facture?.montant_total_ttc &&
@@ -640,7 +660,7 @@ export async function extractInvoiceData(base64Pdf) {
 
   const confianceFaible = confidence !== null && confidence < 0.6
 
-  const needsReview = parseFailed || champsClesManquants || confianceFaible
+  const needsReview = parseFailed || champsClesManquants || confianceFaible || ecartSuspect
 
   return { extracted, needsReview, confidence, rawText }
 }

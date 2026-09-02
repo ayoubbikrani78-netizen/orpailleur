@@ -206,6 +206,7 @@ export default function Factures() {
         lignes_extraites: JSON.stringify(extracted.lignes || []),
         statut: 'a_verifier',
         extraction_incomplete: needsReview,
+        ecart_montant_ht: extracted.controleTotal?.ecart ?? null,
         confiance_ocr: confidence
       }).eq('id', factureInserted.id)
 
@@ -687,6 +688,19 @@ async function deleteFacture() {
                     <Icon size={12} />
                     {config.label}
                   </span>
+                  {f.extraction_incomplete && (
+                    <span
+                      className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium bg-red-50 text-red-600"
+                      title={
+                        f.ecart_montant_ht
+                          ? `La somme des lignes extraites ne correspond pas au total HT de la facture (écart de ${Number(f.ecart_montant_ht).toFixed(2)}€) — il manque probablement une ou plusieurs lignes. Compare avec le PDF original avant de valider.`
+                          : "L'extraction automatique est peu fiable pour cette facture (échec de lecture ou champs manquants) — vérifie les lignes manuellement avant de valider."
+                      }
+                    >
+                      <AlertCircle size={12} />
+                      Extraction à vérifier{f.ecart_montant_ht ? ` (écart ${Number(f.ecart_montant_ht).toFixed(2)}€)` : ''}
+                    </span>
+                  )}
                   {f.statut === 'validee' && !f.stock_applique && f.fournisseur_id && (
                     <button
                       onClick={() => rattraperStock(f)}
