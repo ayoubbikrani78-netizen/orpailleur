@@ -11,7 +11,7 @@
 // prix" ne peut PAS détecter une inversion entre la colonne Quantité et la colonne
 // Conditionnement — la multiplication étant commutative, le total reste cohérent quel que soit
 // le sens de l'inversion. Ce cas s'est produit sur une vraie facture (voir le piège documenté
-// dans ANNOTATION_PROMPT ci-dessous) : le texte d'en-tête du tableau, tel qu'extrait par l'OCR,
+// dans ANALYSE_LIBRE_PROMPT ci-dessous) : le texte d'en-tête du tableau, tel qu'extrait par l'OCR,
 // ne respecte pas forcément l'ordre réel des colonnes.
 //
 // La correction structurelle : dans une sortie JSON structurée, les champs sont générés dans
@@ -102,44 +102,44 @@ const INVOICE_SCHEMA = {
   }
 }
 
-const ANNOTATION_PROMPT = `Tu es un expert en lecture de factures fournisseurs pour une boulangerie française.
+const ANALYSE_LIBRE_PROMPT = `Tu es un expert en lecture de factures fournisseurs pour une boulangerie française. Voici le texte OCR brut d'une facture, page par page, en Markdown.
 Ce document peut être n'importe quel type de facture (grande distribution, grossiste, artisan, meunerie, multi-pages, etc.) — adapte-toi à sa mise en page réelle.
 
-RÈGLE LA PLUS IMPORTANTE : TU NE FAIS JAMAIS DE CALCUL FINAL. Tu transcris littéralement ce qui est imprimé, exactement caractère pour caractère, y compris les virgules et points tels qu'ils apparaissent (ex: si tu vois "1,025.00", écris exactement "1,025.00", ne le convertis JAMAIS toi-même — c'est un programme séparé qui s'en charge). Les seuls champs qui demandent un raisonnement de ta part sont "analyse" (texte libre, décrit ci-dessous) et "poids_volume_par_unite" (un calcul simple et borné, décrit plus bas) — ni l'un ni l'autre ne remplace la transcription exacte des autres champs.
+TA TÂCHE : analyse cette facture EN TEXTE LIBRE, comme si tu la relisais toi-même avant de la ranger. PAS de JSON, pas de format imposé ici — une formalisation séparée s'occupera de mettre tes conclusions en forme ensuite. Prends tout le temps et l'espace nécessaires : relis, compare, reviens en arrière autant que besoin AVANT de conclure sur une ligne. C'est précisément cette liberté qui doit te permettre de ne rien perdre en route, contrairement à un remplissage de formulaire ligne par ligne sans retour possible.
+
+RÈGLE LA PLUS IMPORTANTE : NE FAIS JAMAIS DE CALCUL FINAL DE MONTANT. Recopie les nombres imprimés littéralement (mêmes virgules/points), un programme séparé s'occupe des conversions. Les seuls raisonnements attendus de ta part sont le tri des lignes et le calcul de "poids_volume_par_unite" décrit plus bas.
 
 RÈGLE SUR LES SURIMPRESSIONS : si le document comporte un filigrane ou tampon ("DUPLICATA", "COPIE"...), ignore-le et lis le texte imprimé original en dessous.
 
-RÈGLE SUR LE PÉRIMÈTRE DES LIGNES : ne crée une entrée dans "lignes" que pour les LIGNES DU TABLEAU de produits/facturation (une entrée par ligne de tableau, qu'elle soit produit ou non — la classification s'occupe de trier). Le texte libre en dehors du tableau (instructions de livraison, coordonnées client, conditions générales, minimum de commande, mentions légales...) n'est jamais une ligne et ne doit jamais produire d'entrée.
+RÈGLE SUR LE PÉRIMÈTRE DES LIGNES : ne traite comme une ligne que les LIGNES DU TABLEAU de produits/facturation. Le texte libre en dehors du tableau (instructions de livraison, coordonnées client, conditions générales, minimum de commande, mentions légales...) n'est jamais une ligne.
 
 === FOURNISSEUR ET FACTURE ===
-- "numero" : le numéro de facture complet tel qu'imprimé à côté de "N° FACTURE" ou équivalent, sans le tronquer, même s'il est composite (plusieurs blocs entre parenthèses).
-- "montant_total_ht_brut" et "montant_total_ttc_brut" : recopie exactement le texte des montants totaux (Total HT / Net à Payer / Total TTC), avec la ponctuation d'origine. Si la facture a plusieurs taux de TVA (plusieurs lignes dans un tableau "VENTILATION TVA"), cherche en priorité une ligne de total déjà additionnée ; si tu ne la trouves pas, indique la somme des lignes de HT sous forme de texte numérique (ex: si 25,94 et 633,30, écris "659.24" ou "659,24").
-- Si un champ est introuvable, retourne une chaîne vide "" — n'invente jamais de valeur.
+Identifie clairement : nom/adresse/téléphone/email/siret/siren du fournisseur ; numéro de facture complet (même composite) ; date ; échéance ; délai de paiement en jours ; montant total HT et montant total TTC. Pour les montants totaux, recopie le texte exact (Total HT / Net à Payer / Total TTC). Si la facture a plusieurs taux de TVA, cherche en priorité une ligne de total déjà additionnée ; sinon indique la somme des lignes de HT. Si un champ est introuvable, dis-le clairement plutôt que d'inventer une valeur.
 
-=== MÉTHODE POUR CHAQUE LIGNE DE TABLEAU (à appliquer dans cet ordre) ===
+=== MÉTHODE POUR CHAQUE LIGNE DE TABLEAU (à appliquer dans cet ordre, une ligne à la fois) ===
 
-ÉTAPE 1 — "ligne_brute_complete" : transcris toute la ligne telle qu'imprimée, toutes colonnes confondues, sans interpréter ni trier. C'est ton ancrage : tu dois pouvoir répondre à toutes les étapes suivantes rien qu'en relisant ce texte.
+ÉTAPE 1 — Recopie la ligne telle qu'imprimée, toutes colonnes confondues, sans interpréter ni trier. C'est ton ancrage : tu dois pouvoir répondre à toutes les étapes suivantes rien qu'en relisant ce texte.
 
-ÉTAPE 2 — "classification" : choisis UNE catégorie parmi :
+ÉTAPE 2 — Classe la ligne dans UNE catégorie parmi :
 - "produit" : une vraie ligne de marchandise achetée, avec quantité/prix/montant.
 - "frais_ou_remise" : frais de transport/port, remise, ristourne, escompte, acompte, annulation, arrhes, frais d'impayé ou de rejet de prélèvement ("FRAIS IMPAYES", "REJET PRELEVEMENT"...), ou toute ligne "FRAIS ..." qui n'est pas une marchandise physique.
 - "sous_total_categorie" : une ligne récapitulative intercalée AU MILIEU du tableau de produits, du type "---> TOTAL : PRODUITS FRAIS", "TOTAL PRODUITS SECS/SURGELES" — ce n'est jamais un produit, même si un montant y figure.
 
-ERREUR À NE JAMAIS COMMETTRE (piège réel constaté, dans LES DEUX SENS) : un sous-total de catégorie ne doit JAMAIS être fusionné avec la ligne produit qui le précède, ni avec celle qui le suit. C'est TOUJOURS une entrée à part entière, avec ses propres champs (designation="TOTAL : ...", classification="sous_total_categorie", tous les autres champs vides) — jamais ses nombres attribués à un produit voisin, jamais un produit voisin absorbé dedans.
-Cas n°1 (le produit AVANT disparaît) : la cellule contient à la suite "TARTINABLE PHILADELPHIA NATURE 1.650KG / Qte=4 DLC=05/08/2026 Lot Frs=OFA1360653 / ---> TOTAL : PRODUITS FRAIS" avec les nombres "1,65 4 10,932 72,15" juste avant le total. Il faut DEUX entrées : (1) designation="TARTINABLE PHILADELPHIA NATURE 1.650KG", classification="produit", conditionnement_colonne_brute="1,65", quantite_brute="4", prix_unitaire_brut="10,932", montant_brut="72,15" ; (2) designation="TOTAL : PRODUITS FRAIS", classification="sous_total_categorie", montant_brut="".
-Cas n°2 (le montant du total contamine le produit APRÈS) : la cellule contient "---> TOTAL : PRODUITS FRAIS 437,04" puis juste en dessous "EXTRAIT VANILLE TAHITENSIS GRAINS 500G 1 5 41,619 208,10". Le montant "437,04" appartient UNIQUEMENT au sous-total. La ligne EXTRAIT VANILLE a son propre montant, "208,10", qui ne doit jamais être remplacé par celui du sous-total voisin.
-Règle générale : avant de valider une entrée "sous_total_categorie" ou "produit", relis "ligne_brute_complete" et vérifie qu'aucun nombre appartenant à une ligne n'a été attribué à l'autre.
+ERREUR À NE JAMAIS COMMETTRE (piège réel constaté, dans LES DEUX SENS) : un sous-total de catégorie ne doit JAMAIS être fusionné avec la ligne produit qui le précède, ni avec celle qui le suit. Ce sont TOUJOURS deux lignes distinctes, chacune avec ses propres valeurs — jamais les nombres d'une ligne produit voisine absorbés dans le sous-total, jamais l'inverse.
+Cas n°1 (le produit AVANT disparaît) : la cellule contient à la suite "TARTINABLE PHILADELPHIA NATURE 1.650KG / Qte=4 DLC=05/08/2026 Lot Frs=OFA1360653 / ---> TOTAL : PRODUITS FRAIS" avec les nombres "1,65 4 10,932 72,15" juste avant le total. Il faut identifier DEUX lignes : (1) TARTINABLE PHILADELPHIA NATURE 1.650KG, produit, conditionnement 1,65, quantité 4, prix 10,932, montant 72,15 ; (2) TOTAL : PRODUITS FRAIS, sous-total, sans autre valeur.
+Cas n°2 (le montant du total contamine le produit APRÈS) : la cellule contient "---> TOTAL : PRODUITS FRAIS 437,04" puis juste en dessous "EXTRAIT VANILLE TAHITENSIS GRAINS 500G 1 5 41,619 208,10". Le montant "437,04" appartient UNIQUEMENT au sous-total. EXTRAIT VANILLE a son propre montant, "208,10", qui ne doit jamais être remplacé par celui du sous-total voisin.
+Règle générale : avant de conclure sur une ligne "sous_total_categorie" ou "produit", relis le texte brut et vérifie qu'aucun nombre appartenant à une ligne n'a été attribué à l'autre. C'est l'erreur la plus fréquente constatée jusqu'ici — sois particulièrement vigilant à chaque fois qu'un "TOTAL :" apparaît au milieu du tableau.
 - "rupture_non_livree" : une ligne commandée mais explicitement marquée comme non livrée (mot "Manquant" ou équivalent à la place du prix/montant), même si une quantité commandée est indiquée à côté.
 - "texte_libre_ignorer" : une ligne de tableau qui ne contient en réalité que du texte informatif sans donnée chiffrée exploitable.
 Seules les lignes "produit" seront conservées après traitement — classe soigneusement, ne classe jamais un vrai produit ailleurs juste par doute, et inversement ne classe jamais en "produit" une ligne de frais ou un sous-total.
 
-ÉTAPE 3 — "analyse" (texte libre, quelques phrases) : résous la ligne comme une équation, pas comme des cases à remplir indépendamment.
+ÉTAPE 3 — résous la ligne comme une équation, pas comme des cases à remplir indépendamment. Explique ton raisonnement en quelques phrases.
 D'abord, identifie ce qu'est le produit et son conditionnement D'APRÈS SON NOM (pas d'après la position des colonnes) : si le nom annonce un poids/volume précis (ex: "3kg", "10kg", "BIB 5L", "SAC 2.5KG"), c'est ce nombre qui doit correspondre au conditionnement.
 Ensuite, assigne les nombres de la ligne aux bons champs en vérifiant que quantité × conditionnement × prix ≈ montant, ET que la valeur assignée au conditionnement correspond bien au poids/volume identifié dans le nom.
 
 PIÈGE RÉEL À CONNAÎTRE (ne jamais s'y faire prendre) : sur certains formats de facture, le texte de l'en-tête du tableau, tel qu'extrait, ne respecte PAS l'ordre réel des colonnes imprimées (colonnes empilées sur plusieurs lignes de texte lors de l'extraction). Exemple vécu : une ligne affiche la désignation "FOURRAGE CROQUANT MANGUE PASSION 3kg", puis les nombres "3,00" et "1", puis un prix "24,100" et un montant "72,30". Le nom annonce "3kg" → c'est le "3,00" qui est le CONDITIONNEMENT (poids d'un sac), le "1" est la QUANTITÉ (1 sac commandé) — même si l'en-tête du tableau semblait suggérer l'ordre inverse. Ne te fie JAMAIS à la position du texte d'en-tête pour décider quel nombre est la quantité et lequel est le conditionnement : fie-toi uniquement à la correspondance avec le nom du produit, complétée par la vérification quantité × conditionnement × prix ≈ montant.
 
-ÉTAPE 4 — remplis les champs finaux, en cohérence avec l'analyse qui précède :
+ÉTAPE 4 — conclus clairement sur les valeurs suivantes (elles seront reprises telles quelles à l'étape de formalisation, donc énonce-les sans ambiguïté) :
 - "designation" : le nom du produit uniquement (première ligne de texte de la cellule si plusieurs infos y sont empilées). Deux types de sous-lignes empilées à absorber SANS jamais les traiter comme des lignes séparées :
   (a) mentions de ristourne/remise/note qualité (ex: "RISTOURNE POUR PAIEMENT RAPIDE", "** PRIX UNITAIRE NET") — voir l'exemple SENONE ci-dessous ;
   (b) mentions de traçabilité produit (ex: "Qte=10 DLC=18/06/2026 Lot Frs=N6080109111") — fréquentes sur certains formats, une ligne de ce type sous chaque désignation, jamais un produit distinct.
@@ -190,7 +190,22 @@ Catégories disponibles et leurs sous-catégories (inspirées des rayons de gran
 - Épicerie : Condiments & assaisonnements, Conserves, Huiles
 - Épicerie sucrée : Additifs & texturants, Arômes & colorants, Chocolat & cacao, Décors & finitions, Sucres & édulcorants
 
-Exemples : "COCA COLA UE 33CLx24" -> univers_suggere="Boissons", famille_suggere="Sodas". "BEURRE DOUX AOP CHARENTES" -> univers_suggere="Crèmerie", famille_suggere="Beurre". "FARINE PANIF PRESTIGE 25KG" -> univers_suggere="Meunerie", famille_suggere="Farines". "CROISSANT SECRETS 75gx144" -> univers_suggere="Surgelés", famille_suggere="Viennoiserie surgelée". "SAUMON FUME TRANCHE" -> univers_suggere="Traiteur / Snacking salé", famille_suggere="Poissons". "SALADE ICEBERG" -> univers_suggere="Fruits & Légumes frais", famille_suggere="Légumes frais". "AMANDE ENTIERE BRUTE DECORTIQUE" -> univers_suggere="Fruits secs & oléagineux", famille_suggere="Oléagineux". "CHOC NOIR EXCELLENCE 55%" -> univers_suggere="Épicerie sucrée", famille_suggere="Chocolat & cacao". "HUILE OLIVE EXTRA VIERGE" -> univers_suggere="Épicerie", famille_suggere="Huiles". "Gant nitril noir non poudré" -> univers_suggere="Consommables", famille_suggere="Jetables".`
+Exemples : "COCA COLA UE 33CLx24" -> univers_suggere="Boissons", famille_suggere="Sodas". "BEURRE DOUX AOP CHARENTES" -> univers_suggere="Crèmerie", famille_suggere="Beurre". "FARINE PANIF PRESTIGE 25KG" -> univers_suggere="Meunerie", famille_suggere="Farines". "CROISSANT SECRETS 75gx144" -> univers_suggere="Surgelés", famille_suggere="Viennoiserie surgelée". "SAUMON FUME TRANCHE" -> univers_suggere="Traiteur / Snacking salé", famille_suggere="Poissons". "SALADE ICEBERG" -> univers_suggere="Fruits & Légumes frais", famille_suggere="Légumes frais". "AMANDE ENTIERE BRUTE DECORTIQUE" -> univers_suggere="Fruits secs & oléagineux", famille_suggere="Oléagineux". "CHOC NOIR EXCELLENCE 55%" -> univers_suggere="Épicerie sucrée", famille_suggere="Chocolat & cacao". "HUILE OLIVE EXTRA VIERGE" -> univers_suggere="Épicerie", famille_suggere="Huiles". "Gant nitril noir non poudré" -> univers_suggere="Consommables", famille_suggere="Jetables".
+
+=== VÉRIFICATION FINALE (à faire une fois toutes les lignes analysées, avant de conclure) ===
+Additionne les montants de toutes les lignes que tu as classées "produit" et "frais_ou_remise". Compare cette somme au montant total HT de la facture (identifié plus haut).
+- Si les deux valeurs concordent (à quelques centimes près), dis-le explicitement : la facture est complète.
+- Si elles ne concordent PAS, ne conclus pas immédiatement — c'est le signe qu'une ligne a été oubliée ou mal classée quelque part. Relis en particulier les zones où un "TOTAL :" de sous-catégorie apparaît au milieu du tableau (l'endroit le plus fréquent où une ligne se perd), et les ruptures ("Manquant") qui auraient pu masquer une vraie ligne produit à proximité. Corrige ce que tu trouves, puis refais la somme.
+Termine ta réponse par un résumé explicite : nombre total de lignes "produit" identifiées, montant total recalculé, et écart final avec le total facturé (idéalement 0€).`
+
+const FORMALISATION_PROMPT = `Tu vas recevoir le texte OCR brut d'une facture et une analyse déjà faite de cette facture, ligne par ligne, par un premier passage de raisonnement. Cette analyse a déjà tranché toutes les questions d'interprétation (classification de chaque ligne, assignation des valeurs, calcul du poids/volume par unité, vérification arithmétique, catégorisation).
+
+TA SEULE TÂCHE ICI : transcrire fidèlement les conclusions de cette analyse dans le format JSON demandé. Tu ne raisonnes pas à nouveau, tu ne recalcules rien, tu ne remets rien en question — l'analyse a déjà fait ce travail. Pour chaque ligne que l'analyse a identifiée (produit, frais, sous-total, rupture ou texte libre), crée une entrée correspondante avec les valeurs déjà déterminées.
+
+Si l'analyse a conclu que N lignes sont des "produit", ton JSON doit contenir exactement N entrées avec classification="produit" — ne complète jamais silencieusement une ligne oubliée par l'analyse, et n'en oublie aucune de celles qu'elle a listées. Si un champ n'a pas été déterminé par l'analyse (valeur non trouvée), utilise une chaîne vide "" plutôt que d'inventer.
+
+Rappel sur "ligne_brute_complete" : c'est la transcription brute de la ligne telle que rapportée dans l'analyse (ou le texte OCR d'origine si l'analyse ne l'a pas recopiée intégralement), pas un résumé.
+Rappel sur "poids_volume_par_unite" : reprends la valeur déjà calculée dans l'analyse, au format texte avec unité collée (ex: "2.5kg", "100piece").`
 
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
@@ -477,7 +492,7 @@ export function finaliserLigne(ligneBrute) {
 // ---------------------------------------------------------------------------
 // Filet de sécurité n°5, déterministe (JS, pas le modèle) : récupération d'une ligne produit
 // fusionnée avec un sous-total de catégorie. Constaté en usage réel : malgré une instruction
-// explicite et un exemple travaillé dans le prompt (voir ANNOTATION_PROMPT), le modèle continue
+// explicite et un exemple travaillé dans le prompt (voir ANALYSE_LIBRE_PROMPT), le modèle continue
 // par moments à faire atterrir les valeurs numériques d'une ligne produit (Cond'/Quantité/Prix/
 // Montant) APRÈS le texte "TOTAL : ..." dans ligne_brute_complete, au lieu de les laisser sur
 // leur propre entrée "produit" — cf. le cas réel "TARTINABLE PHILADELPHIA NATURE 1.650KG Qte=4
@@ -532,7 +547,7 @@ function corrigerLignes(lignesBrutes) {
     if (!ligneBrute.designation) continue
 
     // Défense n°1 (principale) : classification explicite décidée par le modèle avant même de
-    // remplir les champs numériques — voir ANNOTATION_PROMPT, étape 2.
+    // remplir les champs numériques — voir ANALYSE_LIBRE_PROMPT, étape 2.
     if (CLASSIFICATIONS_A_EXCLURE.has(ligneBrute.classification)) {
       // Avant d'exclure un sous-total de catégorie, on tente de récupérer une ligne produit que
       // le modèle y aurait fusionnée par erreur (filet n°5, voir plus haut).
@@ -570,9 +585,22 @@ function corrigerLignes(lignesBrutes) {
 /**
  * Extrait les données structurées d'une facture PDF (base64, sans le préfixe data:...).
  * Retourne { extracted, needsReview, confidence, rawText }.
+ *
+ * Fonctionne en 3 étapes séparées plutôt qu'un seul appel structuré :
+ *   1. OCR brut (texte/markdown) — Mistral fait ça très bien nativement, aucun raisonnement requis.
+ *   2. Analyse libre, en texte, SANS contrainte de format JSON — le modèle peut relire, comparer,
+ *      revenir en arrière, se vérifier lui-même avant de conclure sur quoi que ce soit. C'est cette
+ *      étape qui reproduit la façon dont un humain relit une facture avant de la ranger.
+ *   3. Formalisation en JSON structuré à partir de cette analyse déjà faite — le modèle n'a plus
+ *      qu'à recopier des conclusions déjà posées dans le format attendu, sans avoir à raisonner et
+ *      structurer en même temps (ce qui, en une seule passe sur ~90 lignes, est le point où des
+ *      lignes se perdaient malgré des instructions explicites).
+ * Coût et latence plus élevés qu'un seul appel (3 requêtes au lieu d'1), assumé délibérément : la
+ * fiabilité de l'extraction compte plus que la vitesse ou le coût par facture pour ce produit.
  */
 export async function extractInvoiceData(base64Pdf) {
-  const response = await fetch('https://api.mistral.ai/v1/ocr', {
+  // ÉTAPE 1 — OCR brut, sans annotation : on ne demande que le texte/markdown.
+  const ocrResponse = await fetch('https://api.mistral.ai/v1/ocr', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${MISTRAL_API_KEY}`,
@@ -584,39 +612,88 @@ export async function extractInvoiceData(base64Pdf) {
         type: 'document_url',
         document_url: `data:application/pdf;base64,${base64Pdf}`
       },
-      document_annotation_format: INVOICE_SCHEMA,
-      document_annotation_prompt: ANNOTATION_PROMPT,
-      confidence_scores_granularity: 'page',
       include_image_base64: false
     })
   })
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => '')
-    throw new Error(`Erreur API OCR Mistral (${response.status}): ${errText}`)
+  if (!ocrResponse.ok) {
+    const errText = await ocrResponse.text().catch(() => '')
+    throw new Error(`Erreur API OCR Mistral, étape 1/3 (${ocrResponse.status}): ${errText}`)
   }
 
-  const data = await response.json()
+  const ocrData = await ocrResponse.json()
+  const rawText = (ocrData.pages || []).map(p => p.markdown || '').join('\n\n')
 
-  const rawText = (data.pages || []).map(p => p.markdown || '').join('\n\n')
+  if (!rawText.trim()) {
+    throw new Error('Erreur OCR : aucun texte extrait du document (page(s) vide(s) ou illisible(s)).')
+  }
 
-  const confidences = (data.pages || [])
-    .map(p => p.confidence_scores?.average_page_confidence_score)
-    .filter(c => typeof c === 'number')
-  const confidence = confidences.length
-    ? confidences.reduce((a, b) => a + b, 0) / confidences.length
-    : null
+  // ÉTAPE 2 — analyse libre, en texte, à partir du texte OCR brut.
+  const analyseResponse = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${MISTRAL_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'mistral-large-latest',
+      temperature: 0,
+      messages: [
+        { role: 'system', content: ANALYSE_LIBRE_PROMPT },
+        { role: 'user', content: rawText }
+      ]
+    })
+  })
+
+  if (!analyseResponse.ok) {
+    const errText = await analyseResponse.text().catch(() => '')
+    throw new Error(`Erreur API OCR Mistral, étape 2/3 — analyse (${analyseResponse.status}): ${errText}`)
+  }
+
+  const analyseData = await analyseResponse.json()
+  const analyseTexte = analyseData.choices?.[0]?.message?.content || ''
+
+  console.log('OCR — analyse libre (étape 2/3, pour diagnostic) :', analyseTexte)
+
+  if (!analyseTexte.trim()) {
+    throw new Error('Erreur OCR : analyse vide renvoyée par le modèle à l\'étape 2/3.')
+  }
+
+  // ÉTAPE 3 — formalisation en JSON structuré à partir de l'analyse déjà faite.
+  const jsonResponse = await fetch('https://api.mistral.ai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${MISTRAL_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'mistral-large-latest',
+      temperature: 0,
+      response_format: INVOICE_SCHEMA,
+      messages: [
+        { role: 'system', content: FORMALISATION_PROMPT },
+        { role: 'user', content: `=== TEXTE OCR BRUT DE LA FACTURE ===\n${rawText}\n\n=== ANALYSE DÉJÀ FAITE (à formaliser en JSON, sans rien recalculer) ===\n${analyseTexte}` }
+      ]
+    })
+  })
+
+  if (!jsonResponse.ok) {
+    const errText = await jsonResponse.text().catch(() => '')
+    throw new Error(`Erreur API OCR Mistral, étape 3/3 — formalisation (${jsonResponse.status}): ${errText}`)
+  }
+
+  const jsonData = await jsonResponse.json()
 
   let brut = null
   let parseFailed = false
   try {
-    brut = JSON.parse(data.document_annotation)
+    brut = JSON.parse(jsonData.choices?.[0]?.message?.content || '')
   } catch (e) {
     parseFailed = true
     brut = { fournisseur: {}, facture: {}, lignes: [] }
   }
 
-  console.log('OCR — données brutes transcrites par le modèle (pour diagnostic) :', JSON.parse(JSON.stringify(brut)))
+  console.log('OCR — données brutes formalisées en JSON (étape 3/3, pour diagnostic) :', JSON.parse(JSON.stringify(brut)))
 
   const extracted = {
     fournisseur: brut.fournisseur || {},
@@ -658,9 +735,12 @@ export async function extractInvoiceData(base64Pdf) {
     !extracted.facture?.montant_total_ttc &&
     (!extracted.lignes || extracted.lignes.length === 0)
 
-  const confianceFaible = confidence !== null && confidence < 0.6
+  // Le score de confiance page par page n'existe que sur l'endpoint d'annotation OCR intégré ;
+  // en 3 étapes séparées on ne l'a plus — on s'appuie sur les autres signaux (échec de parsing,
+  // champs clés manquants, écart de montant) qui sont de toute façon plus fiables.
+  const confidence = null
 
-  const needsReview = parseFailed || champsClesManquants || confianceFaible || ecartSuspect
+  const needsReview = parseFailed || champsClesManquants || ecartSuspect
 
   return { extracted, needsReview, confidence, rawText }
 }
