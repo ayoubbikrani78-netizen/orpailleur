@@ -636,7 +636,7 @@ export async function extractInvoiceData(base64Pdf) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'mistral-large-latest',
+      model: 'mistral-small-latest',
       temperature: 0,
       messages: [
         { role: 'system', content: ANALYSE_LIBRE_PROMPT },
@@ -667,7 +667,7 @@ export async function extractInvoiceData(base64Pdf) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'mistral-large-latest',
+      model: 'mistral-small-latest',
       temperature: 0,
       response_format: INVOICE_SCHEMA,
       messages: [
